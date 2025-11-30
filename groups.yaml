@@ -1,0 +1,13 @@
+# ============================
+# Groups
+# ============================
+
+# Household People
+# Group of all tracked household members (person entities)
+# Used by occupancy sensors, dashboards, and automations
+household_people:
+  name: Household People
+  entities:
+    - person.neil_greene
+    - person.chloe_greene
+    - person.jaydon_greene

@@ -1,0 +1,55 @@
+version: 4
+mqtt:
+  base_topic: zigbee2mqtt
+  server: mqtt://core-mosquitto:1883
+  user: addons
+  password: il8loovoo2dee8Iveim7Moh7oodae7jaiPi1azaifu3yoo7UthiePhei2FeeX9No
+serial:
+  disable_led: false
+  baudrate: 115200
+  rtscts: false
+  adapter: ember
+  port: tcp://192.168.20.153:6638
+advanced:
+  log_level: info
+  channel: 11
+  transmit_power: 20
+  network_key:
+    - 217
+    - 209
+    - 14
+    - 25
+    - 132
+    - 100
+    - 135
+    - 74
+    - 93
+    - 191
+    - 224
+    - 228
+    - 135
+    - 75
+    - 220
+    - 67
+  pan_id: 4118
+  ext_pan_id:
+    - 97
+    - 82
+    - 62
+    - 11
+    - 176
+    - 141
+    - 9
+    - 44
+frontend:
+  enabled: true
+  port: 8099
+homeassistant:
+  enabled: true
+devices:
+  '0xffffb40e0603910e':
+    friendly_name: Dryer Vibration Sensor
+  '0x54ef44100146e0d6':
+    friendly_name: Family Room Presense Sensor
+  '0x54ef44100146d013':
+    friendly_name: Kitchen Presense Sensor

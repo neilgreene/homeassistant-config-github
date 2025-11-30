@@ -1,0 +1,134 @@
+arm_ring_alarm:
+  alias: Arm Ring alarm (helper)
+  description: Arms the Ring alarm with optional notify message.
+  mode: single
+  fields:
+    alarm_entity:
+      description: Alarm entity_id
+      example: alarm_control_panel.my_home_alarm
+      default: alarm_control_panel.my_home_alarm
+    arm_mode:
+      description: Arm mode (away or home)
+      example: away
+      default: away
+    notify:
+      description: Optional notify service to call after arming
+      example: notify.upstairs_office_show_announce
+      default: ""
+    message:
+      description: Optional message to announce after arming
+      example: Arming the Ring alarm.
+      default: ""
+  sequence:
+    # --- Arm the alarm ---
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ arm_mode == 'home' }}"
+          sequence:
+            - action: alarm_control_panel.alarm_arm_home
+              target:
+                entity_id: "{{ alarm_entity }}"
+              data:
+                code: !secret ring_alarm_code
+        - conditions:
+            - condition: template
+              value_template: "{{ arm_mode == 'away' }}"
+          sequence:
+            - action: alarm_control_panel.alarm_arm_away
+              target:
+                entity_id: "{{ alarm_entity }}"
+              data:
+                code: !secret ring_alarm_code
+
+    # --- Optional notification ---
+    - if:
+        - condition: template
+          value_template: "{{ notify | length > 0 and message | length > 0 }}"
+      then:
+        - action: notify.send_message
+          target:
+            entity_id: "{{ notify }}"
+          data:
+            message: "{{ message }}"
+
+
+disarm_ring_alarm:
+  alias: Disarm Ring Alarm (helper)
+  description: Disarms the Ring alarm using the code from secrets.yaml
+  mode: single
+
+  sequence:
+    - action: alarm_control_panel.alarm_disarm
+      target:
+        entity_id: alarm_control_panel.my_home_alarm
+      data:
+        code: !secret ring_alarm_code
+
+
+cycle_home_mode:
+  alias: Cycle Home Mode
+  sequence:
+    - choose:
+        - conditions: "{{ is_state('input_select.home_mode', 'Normal Mode') }}"
+          sequence:
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.home_mode
+              data:
+                option: Guest Mode
+        - conditions: "{{ is_state('input_select.home_mode', 'Guest Mode') }}"
+          sequence:
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.home_mode
+              data:
+                option: Vacation Mode
+        - conditions: "{{ is_state('input_select.home_mode', 'Vacation Mode') }}"
+          sequence:
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.home_mode
+              data:
+                option: Normal Mode
+alexa_morning_disarm_notify:
+  alias: Alexa Morning Disarm Notify
+  description: >
+    Optionally announces a good-morning Ring disarm message
+    across all Echo devices if the Alexa integration is available.
+  mode: single
+
+  sequence:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: >-
+                {{
+                  'notify.family_room_echo_speak' in integration_entities('notify')
+                  or 'notify.kitchen_show_speak' in integration_entities('notify')
+                  or 'notify.upstairs_office_show_speak' in integration_entities('notify')
+                  or 'notify.master_bathroom_echo_speak' in integration_entities('notify')
+                }}
+          sequence:
+            - action: notify.send_message
+              data:
+                message: >
+                  Good morning. Disarming the Ring alarm.
+                target:
+                  entity_id:
+                    - notify.family_room_echo_speak
+                    - notify.kitchen_show_speak
+                    - notify.upstairs_office_show_speak
+                    - notify.master_bathroom_echo_speak
+
+request_neil_location_update:
+  alias: "Request Neil's Location Update"
+  sequence:
+    - action: notify.mobile_app_neils_iphone_17
+      data:
+        message: "Testing notification"
+    - delay:
+        seconds: 2
+    - action: notify.mobile_app_neils_iphone_17
+      data:
+        message: "request_location_update"

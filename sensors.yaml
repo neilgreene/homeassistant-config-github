@@ -1,0 +1,82 @@
+## ==========================================================
+##  NFL Teams
+## ==========================================================
+- platform: teamtracker
+  league_id: NFL
+  team_id: DET
+  name: Detroit Lions
+- platform: teamtracker
+  league_id: NFL
+  team_id: GB
+  name: Green Bay
+- platform: teamtracker
+  league_id: NFL
+  team_id: CHI
+  name: Chicago Bears
+- platform: teamtracker
+  league_id: NFL
+  team_id: MIN
+  name: Minnesota Vikings
+- platform: teamtracker
+  league_id: NFL
+  team_id: BUF
+  name: Buffalo Bills
+- platform: teamtracker
+  league_id: NFL
+  team_id: MIA
+  name: Miami Dolphins
+
+# ==========================================================
+# AUTOMATION FAILURE LOG SENSORS
+#
+# Purpose:
+#   Provides visibility into recent automation and system warnings
+#   captured in /config/logs/automation_failures.log. This file is
+#   maintained by the [MONITOR]: Log Automation Execution Failures
+#   automation, which writes WARNING-level system_log_event messages
+#   for automations to disk.
+#
+# Design:
+#   - sensor.recent_automation_failures
+#       Reads the last 10 lines of automation_failures.log and
+#       reverses order (most recent first) for clarity.
+#
+#   - sensor.recent_automation_failures_test
+#       Simple echo-based sensor to verify command_line integration
+#       is operational before using the production sensor.
+#
+# Notes:
+#   - Requires that Home Assistant has read access to /config/logs.
+#   - The "notify.file" integration remains broken in HA Core
+#     (see bug: https://github.com/home-assistant/core/issues/132555)
+#     — the command_line workaround replaces that functionality.
+# ==========================================================
+
+# Bluetooth sensor using ESPresense via MQTT
+- platform: mqtt_room
+  device_id: "phone:neilsiphonebt"
+  name: "Neil's iPhone Room Location"
+  away_timeout: 3
+  state_topic: "espresense/devices/phone:neilsiphonebt"
+  unique_id: 1c35a591-b9ff-49de-8f53-5da7fe4b8f74
+
+- platform: mqtt_room
+  device_id: "phone:jaydonsiphonebt"
+  name: "Jaydons iPhone Bluetooth Location"
+  away_timeout: 3
+  state_topic: "espresense/devices/phone:jaydonsiphonebt"
+  unique_id: 11ad6af4-b416-4d38-88dd-adcd97ca2eff
+
+- platform: mqtt_room
+  device_id: "phone:phone-chloesiphonebt"
+  name: "Chloes iPhone Bluetooth Location"
+  away_timeout: 3
+  state_topic: "espresense/devices/phone:phone-chloesiphonebt"
+  unique_id: 5e050cae-cc13-4862-b17f-839bd020d6b8
+
+- platform: mqtt_room
+  device_id: "phone:fireatabletbt"
+  name: "Fire Tablet Bluetooth Location"
+  away_timeout: 3
+  state_topic: "espresense/devices/phone:firetabletbt"
+  unique_id: 0456ceba-a710-4270-aa54-27be43ca8d75

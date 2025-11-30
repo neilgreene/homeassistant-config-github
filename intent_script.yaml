@@ -1,0 +1,21 @@
+# ==========================================================
+# intent_script.yaml
+#
+# Intent handlers for Home Assistant Voice responses
+# ==========================================================
+
+GarageYes:
+  action:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.garage_voice_yes
+  speech:
+    text: "Understood"
+
+GarageNo:
+  action:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.garage_voice_no
+  speech:
+    text: "Understood"

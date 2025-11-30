@@ -1,0 +1,5749 @@
+- id: '1756068885644'
+  alias: '[LIGHTING]: Sunrise/Sunset Lighting'
+  triggers:
+  - trigger: sun
+    event: sunset
+    offset: '0'
+    id: Sunset
+  - trigger: sun
+    event: sunrise
+    offset: -00:15:00
+    id: Sunrise
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Sunset
+      sequence:
+      - action: light.turn_on
+        target:
+          entity_id: 1a12a0e8164f530590fde8e92fcfc824
+        data:
+          brightness_pct: 60
+    - conditions:
+      - condition: trigger
+        id: Sunrise
+      sequence:
+      - action: light.turn_off
+        target:
+          entity_id: 593af15c5b2908bb3ea48b41e469b547
+  mode: single
+- id: '1756237012111'
+  alias: '[CALENDAR]: Calendar notifications for Neil'
+  description: ''
+  triggers:
+  - trigger: calendar
+    entity_id: calendar.neilgreene0102_gmail_com
+    event: start
+    offset: '-1:0:0'
+  - trigger: calendar
+    entity_id: calendar.neil
+    event: start
+    offset: '-1:0:0'
+  - trigger: calendar
+    entity_id: calendar.neil_greene_calendar_calendar
+    event: start
+    offset: '-1:0:0'
+  - trigger: calendar
+    entity_id: calendar.neilgreene0102_gmail_com
+    event: start
+    offset: -0:15:0
+  - trigger: calendar
+    entity_id: calendar.neil
+    event: start
+    offset: -0:15:0
+  - trigger: calendar
+    entity_id: calendar.neil_greene_calendar_calendar
+    event: start
+    offset: -0:15:0
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: notify.send_message
+    metadata: {}
+    data:
+      message: "Event {{ trigger.calendar_event.summary }} starts at\n  {{ as_timestamp(trigger.calendar_event.start)
+        | timestamp_custom('%-I:%M %p') }}.\n"
+    target:
+      entity_id: notify.upstairs_office_show_announce
+  - action: notify.mobile_app_neils_iphone
+    metadata: {}
+    data:
+      title: Calendar Event
+      message: Event {{ trigger.calendar_event.summary }} starts at   {{ as_timestamp(trigger.calendar_event.start)
+        | timestamp_custom('%-I:%M %p') }}.
+  mode: single
+- id: '1756712999781'
+  alias: '[OCCUPANCY]: Neil''s bed detection active.'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.bed_presence_masterbedroom_occupied_left
+    from:
+    to: 'on'
+    for:
+      hours: 0
+      minutes: 5
+      seconds: 0
+    id: SLEEP DETECTED
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - if:
+    - condition: state
+      entity_id: input_boolean.alexa_announcements_enabled
+      state: 'on'
+    then:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Enjoy your rest Neil.
+      target:
+        entity_id: notify.neil_s_echo_show_speak
+  - type: turn_off
+    device_id: 9418f8e350984e9024dfd4e841b84100
+    entity_id: 593af15c5b2908bb3ea48b41e469b547
+    domain: light
+  - type: turn_off
+    device_id: 48944e08b686986fe2b6c4574d672efd
+    entity_id: bc06a41ef2c3523d9bd998d8e43be7b7
+    domain: light
+  - type: turn_off
+    device_id: e0b09f2450d421d054eb7551d44bcd0b
+    entity_id: 0b69d1f79a14200841dee26d339832a7
+    domain: light
+  - type: turn_off
+    device_id: 53e8d63584fd65392329cdbabbf815bc
+    entity_id: fc2fe6a1d343e0add4dc8eb22d4fa1dd
+    domain: fan
+  - action: input_boolean.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: input_boolean.neil_is_in_the_bed
+  mode: single
+- id: '1756848002475'
+  alias: '[OCCUPANCY]: Master bed sleep detection cleared'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.bed_presence_masterbedroom_occupied_left
+    from: 'on'
+    to: 'off'
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 3
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.neil_is_in_the_bed
+      state: 'on'
+  actions:
+  - if:
+    - condition: time
+      after: '23:00:00'
+      before: 06:00:00
+      weekday:
+      - sun
+      - mon
+      - tue
+      - wed
+      - thu
+      - fri
+      - sat
+    - condition: state
+      entity_id: input_boolean.alexa_announcements_enabled
+      state: 'on'
+    then:
+    - type: turn_on
+      device_id: 9d88e9ad2963fff12f2b956e2a8ee01f
+      entity_id: 1a12a0e8164f530590fde8e92fcfc824
+      domain: light
+      brightness_pct: 20
+    - delay:
+        hours: 0
+        minutes: 0
+        seconds: 3
+        milliseconds: 0
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Hi Neil.  Let me set the lighting for you.
+      target:
+        entity_id:
+        - notify.master_bathroom_echo_speak
+      enabled: false
+  - action: input_boolean.turn_off
+    metadata: {}
+    data: {}
+    target:
+      entity_id: input_boolean.neil_is_in_the_bed
+  - type: turn_on
+    device_id: 48944e08b686986fe2b6c4574d672efd
+    entity_id: bc06a41ef2c3523d9bd998d8e43be7b7
+    domain: light
+    brightness_pct: 45
+    enabled: false
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 5
+      milliseconds: 0
+  - action: notify.send_message
+    metadata: {}
+    data:
+      message: Hi Neil.  Let me set the lighting for you.
+    target:
+      entity_id:
+      - notify.upstairs_office_show_speak
+      - notify.master_bathroom_echo_speak
+    enabled: false
+  mode: single
+- id: '1756851009689'
+  alias: '[LIGHTING]: Set home lighting while no one is home'
+  description: Adjusts lighting when the house becomes unoccupied.
+  triggers:
+  - trigger: numeric_state
+    entity_id:
+    - sensor.household_home_count
+    below: 1
+    for:
+      hours: 0
+      minutes: 5
+      seconds: 0
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions: []
+  mode: single
+- id: '1756887987147'
+  alias: '[PROXIMITY]: Notification when someone is approaching or leaving the home.'
+  description: Sends notifications when proximity sensors detect someone approaching
+    or leaving the home.
+  triggers:
+  - trigger: numeric_state
+    entity_id:
+    - sensor.household_home_count
+    above: 0
+    id: Approaching
+    for:
+      hours: 0
+      minutes: 2
+      seconds: 0
+  - trigger: numeric_state
+    entity_id:
+    - sensor.household_home_count
+    below: 1
+    id: Leaving
+    for:
+      hours: 0
+      minutes: 2
+      seconds: 0
+  - trigger: numeric_state
+    entity_id:
+    - sensor.home_proximity_nearest_distance
+    below: 1000
+    id: Approaching
+    for:
+      hours: 0
+      minutes: 2
+      seconds: 0
+  - trigger: numeric_state
+    entity_id:
+    - sensor.home_proximity_nearest_distance
+    above: 1000
+    id: Leaving
+    for:
+      hours: 0
+      minutes: 2
+      seconds: 0
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_select.home_mode
+      state: Normal Mode
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Approaching
+      - condition: or
+        conditions:
+        - condition: state
+          entity_id: sensor.home_proximity_nearest_direction_of_travel
+          state: towards
+        - condition: state
+          entity_id: sensor.home_proximity_nearest_direction_of_travel
+          state: arrived
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          target:
+            entity_id: notify.upstairs_office_show_speak
+          data:
+            message: Someone is approaching the home.
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Someone is approaching the home.
+    - conditions:
+      - condition: trigger
+        id: Leaving
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Someone is now leaving the home.
+      - action: notify.send_message
+        target:
+          entity_id: notify.upstairs_office_show_speak
+        data:
+          message: Someone is now leaving the home.
+  mode: restart
+- id: '1756952713381'
+  alias: '[Triggered]: Ring Alarm has been triggered'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - alarm_control_panel.my_home_alarm
+    from:
+    to: triggered
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: light.turn_on
+    metadata: {}
+    data:
+      rgb_color:
+      - 249
+      - 11
+      - 11
+      brightness_pct: 100
+      flash: long
+    target:
+      device_id: f2e801edc4d80f1c1df5b338b7eb3223
+  - action: light.turn_on
+    metadata: {}
+    data: {}
+    target:
+      device_id: 4a239c1241b5ae650dc953648e6326b1
+    enabled: false
+  - device_id: cfdd60bf2e0d2116bd58b84632bbf3dc
+    domain: light
+    entity_id: 8d3ad43eae271d0e3cf3672b17903996
+    type: flash
+  - device_id: cfc753504831112866c069fb426e77cc
+    domain: light
+    entity_id: ee1fca66e7af39526b2ab97dd1ebae42
+    type: flash
+  mode: single
+- id: '1757332957996'
+  alias: Test Announce and Speak to Alexa devices.
+  description: ''
+  triggers: []
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: notify.send_message
+    metadata: {}
+    data:
+      message: This is an Announcment to Alexa
+    target:
+      entity_id: notify.upstairs_office_show_announce
+  - action: notify.send_message
+    metadata: {}
+    data:
+      message: This is an Speak to Alexa
+    target:
+      entity_id: notify.upstairs_office_show_speak
+  - action: notify.send_message
+    metadata: {}
+    data:
+      message: This is speaking using Choose device.
+    target:
+      device_id: e49b66fc5b9309490a0b85ad063cd53d
+  mode: single
+- id: '1757400241072'
+  alias: Test - Play Music on Upstairs Office Show
+  description: ''
+  triggers: []
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: media_player.media_play
+    metadata: {}
+    data: {}
+    target:
+      device_id: 5e456760581296f2499c69c920ccb52e
+  mode: single
+- id: '1757446370501'
+  alias: '[DEVELOPMENT]:  Play sound file to Sonos and Home Assistant Speaker'
+  description: ''
+  triggers: []
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: media_player.play_media
+    target:
+      entity_id:
+      - media_player.home_assistant_voice_0a2745_media_player_2
+    data:
+      media:
+        media_content_id: http://192.168.20.102:8123/local/sounds/alarm1.wav
+        media_content_type: music
+  mode: single
+- id: '1757490188005'
+  alias: Check cars are locked when parked and we are at home.
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.i4_edrive35_door_lock_state
+    to: 'on'
+    id: i4_unlocked
+  - trigger: state
+    entity_id:
+    - binary_sensor.x3_sdrive30i_door_lock_state
+    from:
+    to: 'on'
+    id: x3_unlocked
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - i4_unlocked
+      - condition: and
+        conditions:
+        - condition: state
+          entity_id: input_boolean.auto_lock_bmw_i4
+          state: 'on'
+      sequence:
+      - action: lock.lock
+        metadata: {}
+        data: {}
+        target:
+          device_id: eca5129de1b7effd76d81c24e10cc2fa
+      - action: notify.mobile_app_neils_iphone
+        metadata: {}
+        data:
+          message: Locking Neil's BMW i4.
+    - conditions:
+      - condition: trigger
+        id:
+        - x3_unlocked
+      - condition: and
+        conditions:
+        - condition: state
+          entity_id: input_boolean.auto_lock_bmw_x3
+          state: 'on'
+      sequence:
+      - action: lock.lock
+        metadata: {}
+        data: {}
+        target:
+          device_id: 579dc958256e32b8edb3463606d941b6
+      - action: notify.mobile_app_neils_iphone
+        metadata: {}
+        data:
+          message: Locking Jaydon's BMW X3.
+  mode: single
+- id: '1757793367159'
+  alias: Motion Sensor Detection Enabled/Disabled
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.all_motion_sensors
+    to: 'on'
+    id: Motion Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.all_motion_sensors
+    to: 'off'
+    id: Motion Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Motion Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Motion Detection Enabled
+        target:
+          entity_id: notify.upstairs_office_show_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Motion Detection Disabled.
+      target:
+        entity_id: notify.upstairs_office_show_speak
+  mode: single
+- id: '1757794414219'
+  alias: Chloe's Room do not disturb announcement
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_chloe_s_room
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_chloe_s_room
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.alexa_announcements_enabled
+      state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Chloe's room do not disturb enabled.
+        target:
+          entity_id:
+          - notify.chloe_s_echo_show_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Chloe's room do not disturb disabled.
+      target:
+        entity_id: notify.chloe_s_echo_show_speak
+  mode: single
+- id: '1757794542866'
+  alias: Guest Room do not disturb announcement
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_guest_room
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_guest_room
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.alexa_announcements_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Guest room do not disturb enabled.
+        target:
+          entity_id:
+          - notify.guest_room_echo_dot_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Guest room do not disturb disabled.
+      target:
+        entity_id:
+        - notify.guest_room_echo_dot_speak
+  mode: single
+- id: '1757794636527'
+  alias: Jaydon's Room do not disturb announcement
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_jaydon_s_room
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_jaydon_s_room
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.alexa_announcements_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Jaydon's room do not disturb enabled.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Jaydon's room do not disturb disabled.
+      target:
+        entity_id: notify.upstairs_office_show_speak
+  mode: single
+- id: '1757794717727'
+  alias: '[DO NOT DISTURB]: Master bedroom do not disturb announcement'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_master_bedroom
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_master_bedroom
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.alexa_announcements_enabled
+      state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Master bedroom do not disturb enabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.neil_s_echo_show_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Master bedroom do not disturb disabled.
+      target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.neil_s_echo_show_speak
+  mode: single
+- id: '1757795006254'
+  alias: Kitchen do not disturb announcement
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_kitchen
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_kitchen
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.alexa_announcements_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Kitchen do not disturb enabled.
+        target:
+          entity_id:
+          - notify.kitchen_show_speak
+          - notify.upstairs_office_show_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Kitchen do not disturb disabled.
+      target:
+        entity_id:
+        - notify.kitchen_show_speak
+        - notify.upstairs_office_show_speak
+  mode: single
+- id: '1757795507850'
+  alias: Family Room do not disturb announcement
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_family_room
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_family_room
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.alexa_announcements_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Family room do not disturb enabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.family_room_echo_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Family room do not disturb disabled.
+      target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.family_room_echo_speak
+  mode: single
+- id: '1757795620351'
+  alias: '[NOTIFICATION]: Garage do not disturb announcement'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_garage
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_garage
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.alexa_announcements_enabled
+      state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Garage do not disturb enabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.garage_echo_dot_5th_gen_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Garage do not disturb disabled.
+      target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.garage_echo_dot_5th_gen_speak
+  mode: single
+- id: '1757795715740'
+  alias: Patio do not disturb announcement
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_patio
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_patio
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.alexa_announcements_enabled
+      state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Patio do not disturb enabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.family_room_echo_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Patio do not disturb disabled.
+      target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.family_room_echo_speak
+  mode: single
+- id: '1757873573464'
+  alias: Automations Enabled/Disabled Announcement
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.automations_enabled
+    to: 'on'
+    id: Automations Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.automations_enabled
+    to: 'off'
+    id: Automations Disabled
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Automations Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Enabling Home Assistant automations.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Disabling Home Assistant automations.
+      target:
+        entity_id: notify.upstairs_office_show_speak
+  mode: single
+- id: '1757877795276'
+  alias: Office do not disturb announcement
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_office
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.do_not_disturb_office
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.alexa_announcements_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Office do not disturb enabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.garage_echo_dot_5th_gen_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Office do not disturb disabled.
+      target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.garage_echo_dot_5th_gen_speak
+  mode: single
+- id: '1757896469536'
+  alias: ALL ZONE do not disturb announcement
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - switch.all_zones_do_not_disturb
+    to: 'on'
+    id: All Zones Enabled
+  - trigger: state
+    entity_id:
+    - switch.all_zones_do_not_disturb
+    to: 'off'
+    id: All Zones Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.alexa_announcements_enabled
+      state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - All Zones Enabled
+      sequence:
+      - action: input_boolean.toggle
+        metadata: {}
+        data: {}
+        enabled: true
+        target:
+          entity_id: input_boolean.disable_all_automations
+      - action: automation.turn_off
+        metadata: {}
+        data:
+          stop_actions: false
+        target:
+          entity_id:
+          - automation.chloe_s_room_do_not_disturb_announcement
+          - automation.family_room_do_not_disturb_announcement
+          - automation.garage_do_not_disturb_announcement
+          - automation.guest_room_do_not_disturb_announcement
+          - automation.jaydon_s_room_do_not_disturb_announcement
+          - automation.kitchen_do_not_disturb_announcement
+          - automation.master_bedroom_do_not_disturb_announcement
+          - automation.do_not_disturb_office_announcement
+          - automation.patio_do_not_disturb_announcement
+        enabled: true
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 2
+          milliseconds: 0
+      - action: input_boolean.turn_on
+        metadata: {}
+        data: {}
+        target:
+          entity_id:
+          - input_boolean.do_not_disturb_chloe_s_room
+          - input_boolean.do_not_disturb_family_room
+          - input_boolean.do_not_disturb_garage
+          - input_boolean.do_not_disturb_guest_room
+          - input_boolean.do_not_disturb_kitchen
+          - input_boolean.do_not_disturb_office
+          - input_boolean.do_not_disturb_patio
+          - input_boolean.do_not_disturb_jaydon_s_room
+          - input_boolean.do_not_disturb_master_bedroom
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 2
+          milliseconds: 0
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: DO NOT DISTURB enabled for all zones.
+        target:
+          entity_id: notify.alexa_ha_speaker_group_announce
+    default:
+    - action: input_boolean.toggle
+      metadata: {}
+      data: {}
+      enabled: true
+      target:
+        entity_id: input_boolean.disable_all_automations
+    - action: automation.turn_off
+      metadata: {}
+      data:
+        stop_actions: false
+      target:
+        entity_id:
+        - automation.chloe_s_room_do_not_disturb_announcement
+        - automation.family_room_do_not_disturb_announcement
+        - automation.garage_do_not_disturb_announcement
+        - automation.guest_room_do_not_disturb_announcement
+        - automation.jaydon_s_room_do_not_disturb_announcement
+        - automation.kitchen_do_not_disturb_announcement
+        - automation.master_bedroom_do_not_disturb_announcement
+        - automation.do_not_disturb_office_announcement
+        - automation.patio_do_not_disturb_announcement
+      enabled: true
+    - delay:
+        hours: 0
+        minutes: 0
+        seconds: 2
+        milliseconds: 0
+    - action: input_boolean.turn_off
+      metadata: {}
+      data: {}
+      target:
+        entity_id:
+        - input_boolean.do_not_disturb_chloe_s_room
+        - input_boolean.do_not_disturb_family_room
+        - input_boolean.do_not_disturb_garage
+        - input_boolean.do_not_disturb_guest_room
+        - input_boolean.do_not_disturb_jaydon_s_room
+        - input_boolean.do_not_disturb_kitchen
+        - input_boolean.do_not_disturb_master_bedroom
+        - input_boolean.do_not_disturb_office
+        - input_boolean.do_not_disturb_patio
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: DO NOT DISTURB disabled for all zones.
+      target:
+        entity_id: notify.alexa_ha_speaker_group_announce
+    - delay:
+        hours: 0
+        minutes: 0
+        seconds: 2
+        milliseconds: 0
+    - action: automation.turn_on
+      metadata: {}
+      data: {}
+      target:
+        entity_id:
+        - automation.chloe_s_room_do_not_disturb_announcement
+        - automation.family_room_do_not_disturb_announcement
+        - automation.garage_do_not_disturb_announcement
+        - automation.guest_room_do_not_disturb_announcement
+        - automation.jaydon_s_room_do_not_disturb_announcement
+        - automation.kitchen_do_not_disturb_announcement
+        - automation.master_bedroom_do_not_disturb_announcement
+        - automation.do_not_disturb_office_announcement
+        - automation.patio_do_not_disturb_announcement
+  mode: single
+- id: '1757986131823'
+  alias: Front door camera motion toggle
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.front_door_camera_motion
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.front_door_camera_motion
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.alexa_announcements_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Front door camera motion enabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.family_room_echo_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Front door camera motion disabled.
+      target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.family_room_echo_speak
+  mode: single
+- id: '1757986272619'
+  alias: Family room camera motion toggle
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.family_room_camera_motion
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.family_room_camera_motion
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.alexa_announcements_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Family Room camera motion enabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.family_room_echo_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Family Room camera motion disabled.
+      target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.family_room_echo_speak
+  mode: single
+- id: '1757986346530'
+  alias: Garage camera motion toggle
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.garage_camera_motion
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.garage_camera_motion
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.alexa_announcements_enabled
+      state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Garage camera motion enabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.family_room_echo_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Garage camera motion disabled.
+      target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.family_room_echo_speak
+  mode: single
+- id: '1757986407776'
+  alias: Patio camera motion toggle
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.patio_camera_motion
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.patio_camera_motion
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.alexa_announcements_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Patio camera motion enabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.family_room_echo_speak
+        enabled: true
+    default:
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Patio camera motion disabled.
+      target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.family_room_echo_speak
+  mode: single
+- id: '1757987642208'
+  alias: Camera motion enable/disable
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.camera_motion_detection
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.camera_motion_detection
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.alexa_announcements_enabled
+      state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: automation.turn_off
+        metadata: {}
+        data:
+          stop_actions: true
+        target:
+          entity_id:
+          - automation.front_door_camera_motion_toggle
+          - automation.family_room_camera_motion_toggle
+          - automation.garage_camera_motion_toggle
+          - automation.patio_camera_motion_toggle
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 2
+          milliseconds: 0
+      - action: input_boolean.turn_on
+        metadata: {}
+        data: {}
+        target:
+          entity_id:
+          - input_boolean.front_door_camera_motion
+          - input_boolean.family_room_camera_motion
+          - input_boolean.garage_camera_motion
+          - input_boolean.patio_camera_motion
+        enabled: true
+      - action: automation.turn_on
+        metadata: {}
+        data: {}
+        target:
+          entity_id:
+          - automation.patio_camera_motion_toggle
+          - automation.family_room_camera_motion_toggle
+          - automation.garage_camera_motion_toggle
+          - automation.front_door_camera_motion_toggle
+        enabled: true
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Camera motion enabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.family_room_echo_speak
+        enabled: true
+    default:
+    - action: automation.turn_off
+      metadata: {}
+      data:
+        stop_actions: true
+      target:
+        entity_id:
+        - automation.front_door_camera_motion_toggle
+        - automation.family_room_camera_motion_toggle
+        - automation.garage_camera_motion_toggle
+        - automation.patio_camera_motion_toggle
+    - delay:
+        hours: 0
+        minutes: 0
+        seconds: 2
+        milliseconds: 0
+    - action: input_boolean.turn_off
+      metadata: {}
+      data: {}
+      target:
+        entity_id:
+        - input_boolean.front_door_camera_motion
+        - input_boolean.family_room_camera_motion
+        - input_boolean.garage_camera_motion
+        - input_boolean.patio_camera_motion
+    - action: automation.turn_on
+      metadata: {}
+      data: {}
+      target:
+        entity_id:
+        - automation.patio_camera_motion_toggle
+        - automation.family_room_camera_motion_toggle
+        - automation.garage_camera_motion_toggle
+        - automation.front_door_camera_motion_toggle
+      enabled: false
+    - action: notify.send_message
+      metadata: {}
+      data:
+        message: Camera motion disabled.
+      target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.family_room_echo_speak
+  mode: single
+- id: '1758005407383'
+  alias: '[NOTIFICATION]: HA restarted notification to Telegram'
+  description: ''
+  triggers:
+  - trigger: homeassistant
+    event: start
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: telegram_bot.send_message
+    metadata: {}
+    data:
+      config_entry_id: 01K58GY4050EA5WNDPC3W4YZ30
+      target:
+      - '-1002979826567'
+      message: Home Assistant has restarted
+  - action: notify.neil_desktop
+    metadata: {}
+    data:
+      message: Home Assistant has restarted
+  mode: single
+- id: '1758099666059'
+  alias: Mute my computer volume
+  description: ''
+  triggers: []
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: button.press
+    metadata: {}
+    data: {}
+    target:
+      entity_id: button.neil_desktop_mediamute
+  mode: single
+- id: '1758159113374'
+  alias: Neil's BMW i4 charging status
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.i4_edrive35_charging_status
+    to: 'on'
+    id: Charging Started
+  - trigger: state
+    entity_id:
+    - binary_sensor.i4_edrive35_charging_status
+    to: 'off'
+    id: Charging Ended
+    from: 'on'
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Charging Started
+      sequence:
+      - action: timer.start
+        metadata: {}
+        data: {}
+        target:
+          entity_id: timer.bmw_charging_time
+      - action: notify.neil_desktop
+        metadata: {}
+        data:
+          message: Neil's BMW i4 charging has begun
+      - action: notify.mobile_app_neils_iphone
+        metadata: {}
+        data:
+          message: Neil's BMW i4 charging has begun
+    - conditions:
+      - condition: trigger
+        id:
+        - Charging Ended
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        metadata: {}
+        data:
+          message: Neil's BMW i4 charging has completed.
+      - action: notify.neil_desktop
+        metadata: {}
+        data:
+          message: Neil's BMW i4 charging has completed.
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: The BMW i4 has finished charging.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.neil_s_echo_show_speak
+  mode: single
+- id: '1758312112624'
+  alias: '[ACCESS]: Garage door has been left open and 30-min timer has expired.'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id: timer.garage_door_open_timer
+    from: active
+    to: idle
+  conditions:
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.automations_enabled
+      state: 'on'
+    - condition: state
+      entity_id: cover.ratgdo32_6a7530_door
+      state: open
+    - condition: state
+      entity_id: input_boolean.garage_door_auto_closing
+      state: 'on'
+  actions:
+  - action: notify.send_message
+    data:
+      message: 'WARNING:  Closing the garage door in 5 seconds.  Please be safe and
+        stay away from the door.'
+    target:
+      entity_id:
+      - notify.garage_echo_dot_5th_gen_speak
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 8
+      milliseconds: 0
+  - device_id: 97321d20533be5d3f3a68796b9a742d0
+    domain: cover
+    entity_id: 3e324aa2ff36ee9b547ca69f90f2b87e
+    type: close
+  - action: notify.mobile_app_neils_iphone
+    data:
+      message: Timer expired, closing the garage door.
+  mode: single
+- id: '1758691148248'
+  alias: '[NOTIFICATION]: Garage door auto closing mode updated.'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id: input_boolean.garage_door_auto_closing
+    to: 'on'
+    id: Auto Closing Enabled
+  - trigger: state
+    entity_id: input_boolean.garage_door_auto_closing
+    to: 'off'
+    id: Auto Closing Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.alexa_announcements_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Auto Closing Enabled
+      sequence:
+      - action: notify.send_message
+        data:
+          message: Garage door auto closing has been enabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.kitchen_show_speak
+          - notify.family_room_echo_speak
+          - notify.master_bathroom_echo_speak
+          - notify.garage_echo_dot_5th_gen_speak
+    - conditions:
+      - condition: trigger
+        id: Auto Closing Disabled
+      sequence:
+      - action: notify.send_message
+        data:
+          message: Garage door auto closing has been disabled.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.family_room_echo_speak
+          - notify.master_bathroom_echo_speak
+          - notify.kitchen_show_speak
+          - notify.garage_echo_dot_5th_gen_speak
+  mode: single
+- id: front_door_open_close
+  alias: '[DOOR SENSOR]: Front door opened/closed'
+  description: ''
+  triggers:
+  - type: opened
+    device_id: e5ba1723557e754cbc7eb44e40532a14
+    entity_id: 6d3a89c20bd3027f37e7d7e05a014b97
+    domain: binary_sensor
+    trigger: device
+    id: Opened
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 2
+  - type: not_opened
+    device_id: e5ba1723557e754cbc7eb44e40532a14
+    entity_id: 6d3a89c20bd3027f37e7d7e05a014b97
+    domain: binary_sensor
+    trigger: device
+    id: Closed
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 2
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Opened
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Front door has been opened.
+          target:
+            entity_id:
+            - notify.upstairs_office_show_speak
+            - notify.garage_echo_dot_5th_gen_speak
+    - conditions:
+      - condition: trigger
+        id: Closed
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Front door has been closed.
+          target:
+            entity_id: notify.upstairs_office_show_speak
+          enabled: false
+  mode: restart
+- id: kitchen_patio_door_open_close
+  alias: '[DOOR SENSOR]: Kitchen patio door opened/closed'
+  description: ''
+  triggers:
+  - type: opened
+    device_id: 75185d7eb5a49784d8b5cb4024bb380e
+    entity_id: 74bdb2ba5a4ecb27c4475b446373a5ba
+    domain: binary_sensor
+    trigger: device
+    id: Opened
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 2
+  - type: not_opened
+    device_id: 75185d7eb5a49784d8b5cb4024bb380e
+    entity_id: 74bdb2ba5a4ecb27c4475b446373a5ba
+    domain: binary_sensor
+    trigger: device
+    id: Closed
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 2
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Opened
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Kitchen patio door has been opened.
+          target:
+            entity_id:
+            - notify.family_room_fire_tv_speak
+            - notify.upstairs_office_show_speak
+    - conditions:
+      - condition: trigger
+        id: Closed
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Kitchen patio door has been closed.
+          target:
+            entity_id: notify.alexa_speak_group
+          enabled: false
+  mode: restart
+- id: family_room_patio_door_open_close
+  alias: '[DOOR SENSOR]: Family room patio door opened/closed'
+  description: ''
+  triggers:
+  - type: opened
+    device_id: ef9e1633ccd128cc652af1066d277229
+    entity_id: 3480ee7bd1234c5aa9fb830dc6a8bc9a
+    domain: binary_sensor
+    trigger: device
+    id: Opened
+  - type: not_opened
+    device_id: ef9e1633ccd128cc652af1066d277229
+    entity_id: 3480ee7bd1234c5aa9fb830dc6a8bc9a
+    domain: binary_sensor
+    trigger: device
+    id: Closed
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Opened
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Family room patio door has been opened.
+          target:
+            entity_id:
+            - notify.family_room_echo_speak
+            - notify.upstairs_office_show_speak
+    - conditions:
+      - condition: trigger
+        id: Closed
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Family room patio door has been closed.
+          target:
+            entity_id: notify.alexa_speak_group
+          enabled: false
+  mode: restart
+- id: garage_entry_open_close
+  alias: '[ACCESS]: Garage entry opened/closed'
+  description: ''
+  triggers:
+  - type: opened
+    device_id: d4d9f024972c3b1f62ec3b1a7b80784c
+    entity_id: fd1397f648d26168253b0203cf23349d
+    domain: binary_sensor
+    trigger: device
+    id: Opened
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 2
+  - type: not_opened
+    device_id: d4d9f024972c3b1f62ec3b1a7b80784c
+    entity_id: fd1397f648d26168253b0203cf23349d
+    domain: binary_sensor
+    trigger: device
+    id: Closed
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 2
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Opened
+      sequence:
+      - condition: state
+        entity_id: timer.garage_entry_announce_timer
+        state: idle
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Garage entry has been opened.
+          target:
+            entity_id:
+            - notify.upstairs_office_show_speak
+      - action: timer.start
+        target:
+          entity_id: timer.garage_entry_announce_timer
+        data: {}
+    - conditions:
+      - condition: trigger
+        id: Closed
+      sequence:
+      - condition: state
+        entity_id: timer.garage_entry_announce_timer
+        state: idle
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Garage entry has been closed.
+          enabled: false
+          target:
+            entity_id: notify.upstairs_office_show_speak
+      - action: timer.start
+        target:
+          entity_id: timer.garage_entry_announce_timer
+  mode: restart
+- id: chloe_bath_window_open_close
+  alias: '[WINDOW SENSOR]: Chloe''s bathroom window opened/closed'
+  description: ''
+  triggers:
+  - type: opened
+    device_id: 7d8737ec13e03349fa0559d65a90605a
+    entity_id: 408b7d802287ce058d106c9a404cd607
+    domain: binary_sensor
+    trigger: device
+    id: Opened
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+  - type: not_opened
+    device_id: 7d8737ec13e03349fa0559d65a90605a
+    entity_id: 408b7d802287ce058d106c9a404cd607
+    domain: binary_sensor
+    trigger: device
+    id: Closed
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Opened
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Chloe's bathroom window has been opened.
+          target:
+            entity_id: notify.alexa_ha_speaker_group_announce
+    - conditions:
+      - condition: trigger
+        id: Closed
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Chloe's bathroom window has been closed.
+          target:
+            entity_id: notify.alexa_ha_speaker_group_announce
+          enabled: false
+  mode: restart
+- id: patio_gate_open_close
+  alias: '[GATE SENSOR]: Patio gate opened/closed'
+  description: ''
+  triggers:
+  - type: opened
+    device_id: cb390468e92d6a295ea8147d594d72f2
+    entity_id: 3f2d8696a8c8c7e9b3cbb8631aa837ff
+    domain: binary_sensor
+    trigger: device
+    id: Opened
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+  - type: not_opened
+    device_id: cb390468e92d6a295ea8147d594d72f2
+    entity_id: 3f2d8696a8c8c7e9b3cbb8631aa837ff
+    domain: binary_sensor
+    trigger: device
+    id: Closed
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Opened
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Patio gate has opened.
+          target:
+            entity_id: notify.alexa_ha_speaker_group_announce
+    - conditions:
+      - condition: trigger
+        id: Closed
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Patio gate has closed.
+          target:
+            entity_id: notify.alexa_ha_speaker_group_announce
+          enabled: false
+  mode: restart
+- id: back_window_open_close
+  alias: '[WINDOW SENSOR]: Back window opened/closed'
+  description: ''
+  triggers:
+  - type: opened
+    device_id: 60ca7ef1937657b6431f242ec107208a
+    entity_id: f8ca21cd36483240f66e81e76392cc4b
+    domain: binary_sensor
+    trigger: device
+    id: Opened
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+  - type: not_opened
+    device_id: 60ca7ef1937657b6431f242ec107208a
+    entity_id: f8ca21cd36483240f66e81e76392cc4b
+    domain: binary_sensor
+    trigger: device
+    id: Closed
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Opened
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Back window has opened.
+          target:
+            entity_id: notify.alexa_ha_speaker_group_announce
+    - conditions:
+      - condition: trigger
+        id: Closed
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Back window has closed.
+          target:
+            entity_id: notify.alexa_ha_speaker_group_announce
+          enabled: false
+  mode: restart
+- id: chloe_bedroom_window_open_close
+  alias: '[WINDOW SENSOR]: Chloe''s bedroom window opened/closed'
+  description: ''
+  triggers:
+  - type: opened
+    device_id: 911f483ca2853d818a3624f5cf79e1d0
+    entity_id: 0bc1163f1ec053e14f16bbd7a5a6b881
+    domain: binary_sensor
+    trigger: device
+    id: Opened
+  - type: not_opened
+    device_id: 911f483ca2853d818a3624f5cf79e1d0
+    entity_id: 0bc1163f1ec053e14f16bbd7a5a6b881
+    domain: binary_sensor
+    trigger: device
+    id: Closed
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Opened
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Chloe's bedroom window has been opened.
+          target:
+            entity_id: notify.alexa_ha_speaker_group_announce
+    - conditions:
+      - condition: trigger
+        id: Closed
+      sequence:
+      - if:
+        - condition: state
+          entity_id: input_boolean.alexa_announcements_enabled
+          state: 'on'
+        then:
+        - action: notify.send_message
+          data:
+            message: Chloe's bedroom window has been closed.
+          target:
+            entity_id: notify.alexa_ha_speaker_group_announce
+          enabled: false
+  mode: restart
+- id: neil_location_tracking
+  alias: '[TRACKING]: Neil Location Tracking'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.neil_home_stable
+    to: 'on'
+    id: Neil arriving at home
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 20
+  - trigger: state
+    entity_id:
+    - binary_sensor.neil_home_stable
+    to: 'off'
+    id: Neil leaving home
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: numeric_state
+    entity_id: sensor.ha_uptime_minutes
+    above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Neil arriving at home
+      sequence:
+      - delay:
+          minutes: 2
+      - condition: state
+        entity_id: binary_sensor.neil_home_stable
+        state: 'on'
+      - if:
+        - condition: state
+          entity_id: input_boolean.do_not_disturb_master_bedroom
+          state: 'off'
+        - condition: sun
+          after: sunset
+        then:
+        - action: light.turn_on
+          target:
+            entity_id:
+            - light.master_bedroom_bedside_lamps
+            - light.master_bedroom_floor_lights
+            - light.upstairs_office
+          data: {}
+      - if:
+        - condition: or
+          conditions:
+          - condition: state
+            entity_id: alarm_control_panel.my_home_alarm
+            state: armed_home
+          - condition: state
+            entity_id: alarm_control_panel.my_home_alarm
+            state: armed_away
+        then:
+        - action: script.disarm_ring_alarm
+          data:
+            alarm_entity: alarm_control_panel.my_home_alarm
+            notify: notify.upstairs_office_show_announce
+            message: Disarming the alarm.
+      - action: light.turn_on
+        target:
+          entity_id:
+          - light.upstairs_office
+        data: {}
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Neil has arrived at home.
+    - conditions:
+      - condition: trigger
+        id: Neil leaving home
+      sequence:
+      - condition: state
+        entity_id: binary_sensor.neil_home_stable
+        state: 'off'
+      - action: light.turn_off
+        target:
+          entity_id:
+          - light.master_bedroom_floor_lights
+          - light.master_bedroom_bedside_lamps
+          - light.upstairs_office
+        data: {}
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 2
+          milliseconds: 0
+      - type: turn_off
+        device_id: 689425bc95eab9b5a5f2990acad49eab
+        entity_id: 948af8b03b0bb678734701361bc023b0
+        domain: remote
+      - type: turn_off
+        device_id: 9434501f7fe7aed0812d909821cfed2c
+        entity_id: f4643039d353f151a009c7fdf37d7296
+        domain: remote
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 2
+          milliseconds: 0
+      - type: turn_off
+        device_id: 420449f4a2487ab41b3f8a4a7c582b79
+        entity_id: f970c7b2c3992f1eea13a24143904f3f
+        domain: remote
+      - type: turn_off
+        device_id: 610bea2572bfd5ebda1185bd17dd9630
+        entity_id: f2ad441bc8e946886ac8e59481ad7a7f
+        domain: remote
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Neil has left the home.
+  mode: single
+- id: jaydon_location_tracking
+  alias: '[TRACKING]: Jaydon Location Tracking'
+  description: 'Consolidates Jaydon''s location tracking into a single automation.
+    Handles notifications for Home, Work, Gym, Zach''s, and 24 Hour Fitness. Controlled
+    by global input_boolean.jaydon_location_tracking_enabled.
+
+    '
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.jaydon_home_stable
+    to: 'on'
+    id: home_arrive
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 30
+    from: 'off'
+  - trigger: state
+    entity_id:
+    - binary_sensor.jaydon_home_stable
+    to:
+    - 'off'
+    id: home_leave
+    for:
+      hours: 0
+      minutes: 15
+      seconds: 0
+    from:
+    - 'on'
+  - trigger: zone
+    entity_id: person.jaydon_greene
+    zone: zone.tommy_s
+    event: enter
+    id: work_arrive
+  - trigger: zone
+    entity_id: person.jaydon_greene
+    zone: zone.tommy_s
+    event: leave
+    id: work_leave
+  - trigger: zone
+    entity_id: person.jaydon_greene
+    zone: zone.planet_hollywood
+    event: enter
+    id: ph_arrive
+  - trigger: zone
+    entity_id: person.jaydon_greene
+    zone: zone.planet_hollywood
+    event: leave
+    id: ph_leave
+  - trigger: zone
+    entity_id: person.jaydon_greene
+    zone: zone.zach_s_home
+    event: enter
+    id: zach_arrive
+  - trigger: zone
+    entity_id: person.jaydon_greene
+    zone: zone.zach_s_home
+    event: leave
+    id: zach_leave
+  - trigger: zone
+    entity_id: person.jaydon_greene
+    zone: zone.24hr_fitness
+    event: enter
+    id: fitness_arrive
+  - trigger: zone
+    entity_id: person.jaydon_greene
+    zone: zone.24hr_fitness
+    event: leave
+    id: fitness_leave
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: home_arrive
+      sequence:
+      - if:
+        - condition: time
+          after: '20:00:00'
+          before: '23:00:00'
+          weekday:
+          - sun
+          - mon
+          - tue
+          - wed
+          - thu
+          - fri
+          - sat
+        then:
+        - type: turn_on
+          device_id: f8b8326445c872b3497cbd48202e1e67
+          entity_id: 39e9fb79f231d67d20ad7f1a313cb202
+          domain: light
+          brightness_pct: 40
+      - action: notify.send_message
+        data:
+          message: Jaydon has arrived at home.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+      - action: notify.mobile_app_neils_iphone
+        metadata: {}
+        data:
+          message: Jaydon is arrived at home.
+    - conditions:
+      - condition: trigger
+        id: home_leave
+      sequence:
+      - type: turn_off
+        device_id: f8b8326445c872b3497cbd48202e1e67
+        entity_id: 39e9fb79f231d67d20ad7f1a313cb202
+        domain: light
+      - type: turn_off
+        device_id: aa4276b231f73d3ffd18764eb188e369
+        entity_id: d9f55dca82991759a32167b3e421bdb8
+        domain: remote
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 5
+          milliseconds: 0
+      - type: turn_off
+        device_id: 2b5bc5a6335f26ce8e2cf14e3267428a
+        entity_id: 164c4c0f7b02754d7951096b1b194907
+        domain: remote
+      - action: notify.mobile_app_neils_iphone
+        metadata: {}
+        data:
+          message: Jaydon is arrived at home.
+      - action: notify.send_message
+        data:
+          message: Jaydon has left home.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+    - conditions:
+      - condition: trigger
+        id: work_arrive
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Jaydon has arrived at work.
+      - action: notify.send_message
+        data:
+          message: Jaydon has arrived at work.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+    - conditions:
+      - condition: trigger
+        id: work_leave
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Jaydon has left work.
+      - action: notify.send_message
+        data:
+          message: Jaydon has left work.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+    - conditions:
+      - condition: trigger
+        id: ph_arrive
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Jaydon has arrived at Planet Hollywood gym.
+      - action: notify.send_message
+        data:
+          message: Jaydon has arrived at Planet Hollywood gym.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+    - conditions:
+      - condition: trigger
+        id: ph_leave
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Jaydon has left Planet Hollywood gym.
+      - action: notify.send_message
+        data:
+          message: Jaydon has left Planet Hollywood gym.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+    - conditions:
+      - condition: trigger
+        id: zach_arrive
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Jaydon has arrived at Zach's.
+      - action: notify.send_message
+        data:
+          message: Jaydon has arrived at Zach's.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+    - conditions:
+      - condition: trigger
+        id: zach_leave
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Jaydon has left Zach's.
+      - action: notify.send_message
+        data:
+          message: Jaydon has left Zach's.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+    - conditions:
+      - condition: trigger
+        id: fitness_arrive
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Jaydon has arrived at 24 Hour Fitness.
+      - action: notify.send_message
+        data:
+          message: Jaydon has arrived at 24 Hour Fitness.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+    - conditions:
+      - condition: trigger
+        id: fitness_leave
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Jaydon has left 24 Hour Fitness.
+      - action: notify.send_message
+        data:
+          message: Jaydo
+- id: chloe_location_tracking
+  alias: '[TRACKING]: Chloe Location Tracking'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.chloe_home_stable
+    to: 'on'
+    id: home_arrive
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 30
+  - trigger: state
+    entity_id:
+    - binary_sensor.chloe_home_stable
+    to:
+    - 'off'
+    id: home_leave
+    for:
+      hours: 0
+      minutes: 15
+      seconds: 0
+  - trigger: zone
+    entity_id: person.chloe_greene
+    zone: zone.concordia
+    event: enter
+    id: school_arrive
+  - trigger: zone
+    entity_id: person.chloe_greene
+    zone: zone.concordia
+    event: leave
+    id: school_leave
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: home_arrive
+      sequence:
+      - if:
+        - condition: sun
+          before: sunset
+          before_offset: '- 01:00:00'
+        then:
+        - type: turn_on
+          device_id: a90afcc85e151d2187459b3556deef82
+          entity_id: 338f627bf91d25eb3097191003ea3848
+          domain: light
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Chloe has arrived at home.
+    - conditions:
+      - condition: trigger
+        id: home_leave
+      sequence:
+      - type: turn_off
+        device_id: ed857ee3e9f688f5ef3cc854a2d9881b
+        entity_id: eaceff688b2ef0cc1e3d0ffc141dc42b
+        domain: light
+        enabled: true
+      - type: turn_off
+        device_id: ee8283b8efe66b0eceeed19ec0f8143f
+        entity_id: 5a2720f4a7dad550e2e770e26a4f74e3
+        domain: remote
+        enabled: true
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 5
+          milliseconds: 0
+      - type: turn_off
+        device_id: 29125ebd1220daa103ab7ef54ea71335
+        entity_id: 8311bfaacf42880c9f2c056b3893b70f
+        domain: remote
+        enabled: true
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Chloe has left home.
+    - conditions:
+      - condition: trigger
+        id: school_arrive
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Chloe has arrived at school.
+    - conditions:
+      - condition: trigger
+        id: school_leave
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Chloe has left school.
+  mode: restart
+- id: watchdog_presence_enforcer
+  alias: '[WATCHDOG]: Turn devices off when home is left unoccupied.'
+  description: 'Runs at HA startup and when home becomes unoccupied. Re-triggers the
+    automations that enforce security and energy rules when the home is unoccupied
+    (Ring, thermostat, TVs, garage). Only runs once per unoccupied period.
+
+    '
+  triggers:
+  - trigger: homeassistant
+    event: start
+    id: startup
+  - trigger: state
+    entity_id:
+    - binary_sensor.home_unoccupied
+    from: 'off'
+    to: 'on'
+    for:
+      hours: 0
+      minutes: 15
+      seconds: 0
+    id: home_became_unoccupied
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: binary_sensor.home_unoccupied
+    state: 'on'
+  - condition: state
+    entity_id: input_select.home_mode
+    state: Normal Mode
+  actions:
+  - action: automation.trigger
+    target:
+      entity_id:
+      - automation.security_arm_ring_in_away_mode_when_home_is_unoccupied_for_15_min
+      - automation.garage_close_garage_when_home_is_unoccupied
+      - automation.climate_turn_off_upstairs_thermostat_when_home_is_unoccupied
+      - automation.media_watchdog_turn_off_all_tvs_when_home_is_unoccupied_for_30_min
+    data:
+      skip_condition: false
+  mode: single
+- id: arm_ring_if_home_unoccupied_15_min
+  alias: '[SECURITY]: WATCHDOG - Arm Ring in AWAY mode when home is unoccupied for
+    15 min.'
+  description: Arm the Ring system in AWAY mode when the house has been unoccupied
+    for 15 minutes.
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.home_unoccupied
+    to: 'on'
+    for:
+      hours: 0
+      minutes: 15
+      seconds: 0
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_select.home_mode
+    state: Normal Mode
+  - condition: numeric_state
+    entity_id: sensor.ha_uptime_minutes
+    above: 5
+  actions:
+  - action: notify.mobile_app_neils_iphone
+    data:
+      message: Home unoccupied for 15 minutes. Arming Ring in AWAY mode.
+  - action: notify.send_message
+    data:
+      message: Arming the Ring alarm now.
+    target:
+      entity_id:
+      - notify.family_room_echo_speak
+      - notify.garage_echo_dot_5th_gen_speak
+      - notify.kitchen_show_speak
+      - notify.upstairs_office_show_speak
+      - notify.master_bathroom_echo_speak
+    enabled: false
+  - action: script.arm_ring_alarm
+    data:
+      alarm_entity: alarm_control_panel.my_home_alarm
+      arm_mode: away
+      notify: notify.mobile_app_neils_iphone
+      message: Setting the home alarm to AWAY mode after 15 minutes of no occupancy.
+  mode: single
+- id: turn_off_upstairs_thermostat_if_home_unoccupied
+  alias: '[CLIMATE]: WATCHDOG - Turn off upstairs thermostat when home is unoccupied
+    for 30 min'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.home_unoccupied
+    to: 'on'
+    for:
+      hours: 0
+      minutes: 30
+      seconds: 0
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: binary_sensor.home_unoccupied
+      state: 'on'
+    - condition: state
+      entity_id: input_select.home_mode
+      state: Normal Mode
+  actions:
+  - action: climate.turn_off
+    metadata: {}
+    data: {}
+    target:
+      entity_id: climate.upstairs_thermostat_thermostat
+  - action: notify.mobile_app_neils_iphone
+    data:
+      message: Upstairs thermostat turned off — home is unoccupied.
+  mode: single
+- id: close_garage_if_home_unoccupied
+  alias: '[GARAGE]: WATCHDOG - Close garage when home is unoccupied for 10 min'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.home_unoccupied
+    to: 'on'
+    for:
+      hours: 0
+      minutes: 10
+      seconds: 0
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: binary_sensor.home_unoccupied
+    state: 'on'
+  - condition: state
+    entity_id: input_select.home_mode
+    state: Normal Mode
+  - condition: state
+    entity_id: cover.ratgdo32_6a7530_door
+    state: open
+  - condition: state
+    entity_id: input_boolean.garage_door_auto_closing
+    state:
+    - 'on'
+  actions:
+  - device_id: 97321d20533be5d3f3a68796b9a742d0
+    domain: cover
+    entity_id: 3e324aa2ff36ee9b547ca69f90f2b87e
+    type: close
+  - action: notify.mobile_app_neils_iphone
+    data:
+      message: Garage door closed — home is unoccupied.
+  mode: single
+- id: 3aca7f1-d617-4cc6-aa3b-8fdba79126a3
+  alias: '[REMINDER] Wednesday evening reminder to take out the trash cans'
+  description: 'Reminds Jaydon every 45 minutes between 3 PM and 11 PM if both Waste
+    cans are still home.
+
+    '
+  triggers:
+  - trigger: time
+    at: '15:00:00'
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: time
+      weekday:
+      - wed
+  actions:
+  - variables:
+      end_time: '{{ as_datetime(today_at(''23:00'')) }}'
+  - repeat:
+      while:
+      - condition: template
+        value_template: '{% set s = states(''sensor.waste_cans_home_count'') %} {%
+          set valid = s not in [''unknown'',''unavailable''] %} {{ valid and (s|int(0)
+          == 2) and (now() < end_time) }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.alexa_announcements_enabled
+            state: 'on'
+          sequence:
+          - action: notify.send_message
+            metadata: {}
+            data:
+              message: Jaydon, the trash cans still need to be taken to the curb.
+            target:
+              entity_id:
+              - notify.jaydon_s_echo_show_speak
+              - notify.kitchen_show_speak
+      - action: notify.mobile_app_jaydons_iphone_2
+        data:
+          title: Trash Night
+          message: Please take the Waste cans to the curb. (Currently {{ states('sensor.waste_cans_home_count')|int(0)
+            }}/2 still at home.)
+          data:
+            push:
+              sound:
+                name: default
+                critical: 0
+      - delay:
+          minutes: 45
+  mode: restart
+- id: 3b1c7d59-449d-4f7f-a695-0cfebbcdf051
+  alias: '[NOTIFICATION]: Trash cans taken for pickup or returned home'
+  description: 'Sends a summary when any trash, recycle, or yard can is taken for
+    pickup or returned home. Uses a 15-minute debounce to prevent repeated notifications.
+    Alexa announces exact counts.
+
+    '
+  triggers:
+  - trigger: state
+    entity_id: sensor.waste_cans_home_count
+    to: '0'
+    for: 00:15:00
+  - trigger: state
+    entity_id: sensor.waste_cans_home_count
+    to: '1'
+    for: 00:15:00
+  - trigger: state
+    entity_id: sensor.waste_cans_home_count
+    to: '2'
+    for: 00:15:00
+  - trigger: state
+    entity_id: sensor.recycle_can_home_count
+    to: '0'
+    for: 00:15:00
+  - trigger: state
+    entity_id: sensor.recycle_can_home_count
+    to: '1'
+    for: 00:15:00
+  - trigger: state
+    entity_id: sensor.yard_can_home_count
+    to: '0'
+    for: 00:15:00
+  - trigger: state
+    entity_id: sensor.yard_can_home_count
+    to: '1'
+    for: 00:15:00
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: time
+      weekday:
+      - wed
+      after: '12:00:00'
+      before: 00:00:00
+    - condition: and
+      conditions:
+      - condition: state
+        entity_id: input_boolean.trash_cans_removed
+        state: 'off'
+  actions:
+  - variables:
+      waste_home: '{{ states(''sensor.waste_cans_home_count'')|int(0) }}'
+      recycle_home: '{{ states(''sensor.recycle_can_home_count'')|int(0) }}'
+      yard_home: '{{ states(''sensor.yard_can_home_count'')|int(0) }}'
+      waste_away: '{{ max(0, 2 - waste_home) }}'
+      recycle_away: '{{ max(0, 1 - recycle_home) }}'
+      yard_away: '{{ max(0, 1 - yard_home) }}'
+      total_away: '{{ waste_away + recycle_away + yard_away }}'
+      pickup_message: "{% if total_away > 0 %}\n  {% set parts = [] %}\n  {% if waste_away
+        > 0 %}{% set parts = parts + ['Trash: ' ~ waste_away ~ '/2'] %}{% endif %}\n
+        \ {% if recycle_away > 0 %}{% set parts = parts + ['Recycle: ' ~ recycle_away
+        ~ '/1'] %}{% endif %}\n  {% if yard_away > 0 %}{% set parts = parts + ['Yard:
+        ' ~ yard_away ~ '/1'] %}{% endif %}\n  {{ parts | join(' • ') }}\n{% else
+        %}\n  All cans are home.\n{% endif %}"
+      voice_line: "{% if total_away > 0 %}\n  {% set parts = [] %}\n  {% if waste_away
+        > 0 %}\n    {% set parts = parts + ['' ~ waste_away ~ ' ' ~ ('trash can' if
+        waste_away == 1 else 'trash cans')] %}\n  {% endif %}\n  {% if recycle_away
+        > 0 %}\n    {% set parts = parts + ['' ~ recycle_away ~ ' recycle can'] %}\n
+        \ {% endif %}\n  {% if yard_away > 0 %}\n    {% set parts = parts + ['' ~
+        yard_away ~ ' yard can'] %}\n  {% endif %}\n  {{ parts|join(' and ') }} {{
+        'is' if total_away == 1 else 'are' }} at the curb.\n{% else %}\n  All cans
+        are home.\n{% endif %}"
+  - action: notify.mobile_app_neils_iphone
+    data:
+      title: "{% if total_away > 0 %}\n  Trashcans for Pickup\n{% else %}\n  Trashcans
+        Returned Home\n{% endif %}"
+      message: '{{ pickup_message }}'
+  mode: single
+- id: arm_ring_home_mode_night
+  alias: '[SECURITY]: Arm Ring in HOME mode at 11:00pm'
+  description: ''
+  triggers:
+  - trigger: time
+    at: '23:30:00'
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_select.home_mode
+    state: Normal Mode
+  - condition: not
+    conditions:
+    - condition: state
+      entity_id: alarm_control_panel.my_home_alarm
+      state: armed_away
+  actions:
+  - action: script.arm_ring_alarm
+    data:
+      alarm_entity: alarm_control_panel.my_home_alarm
+      arm_mode: home
+      notify: notify.mobile_app_neils_iphone
+      message: The Ring alarm has been armed in HOME mode for bedtime.
+  - action: notify.send_message
+    data:
+      message: Arming the Ring alarm in home mode.
+    target:
+      entity_id: notify.upstairs_office_show_speak
+  mode: single
+- id: disarm_ring_at_sunrise
+  alias: '[SECURITY]: Disarm Ring at sunrise'
+  description: 'Disarm Ring a few minutes after sunrise if the system is armed_home
+    and someone is home.
+
+    '
+  triggers:
+  - trigger: sun
+    event: sunrise
+    offset: 00:06:00
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: alarm_control_panel.my_home_alarm
+    state: armed_home
+  - condition: state
+    entity_id: binary_sensor.home_occupied
+    state: 'on'
+  - condition: state
+    entity_id: input_select.home_mode
+    state: Normal Mode
+  actions:
+  - action: script.alexa_morning_disarm_notify
+  - action: script.disarm_ring_alarm
+  mode: single
+- id: '1759862417859'
+  alias: 'Test Alexa Notiications [STATUS: Working]'
+  description: ''
+  triggers: []
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: notify.send_message
+    metadata: {}
+    data:
+      message: Sending a test message to the Upstairs Alexa 1
+    target:
+      entity_id: notify.upstairs_office_show_announce
+  - action: notify.send_message
+    metadata: {}
+    data:
+      message: Sending a test message to the Upstairs Alexa 2
+    target:
+      entity_id: notify.upstairs_office_show_speak
+  - action: notify.mobile_app_neils_iphone
+    metadata: {}
+    data:
+      message: Sending test message to Upstairs Office Alexa
+  mode: single
+- id: notify_home_mode_change
+  alias: '[MODE]: Notify when Home Mode changes'
+  triggers:
+  - trigger: state
+    entity_id: input_select.home_mode
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - if:
+    - condition: state
+      entity_id: input_boolean.alexa_announcements_enabled
+      state: 'on'
+    then:
+    - action: notify.send_message
+      target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.kitchen_show_speak
+        - notify.garage_echo_dot_5th_gen_speak
+      data:
+        message: Home is now in {{ trigger.to_state.state }}.
+  - action: notify.mobile_app_neils_iphone
+    data:
+      title: Home Mode
+      message: Home set to {{ trigger.to_state.state }}.
+    enabled: false
+  mode: single
+- id: 66525f3e-a3d4-4341-8693-9d0356979f04
+  alias: '[MONITOR]: Log automation execution failures to file'
+  description: 'Writes selected Home Assistant system log events to /config/logs/automation_failures.log
+    via shell_command.log_automation_error. This version captures WARNING, ERROR,
+    and CRITICAL (the broader set we verified works) so we can confirm end-to-end
+    logging.
+
+    '
+  triggers:
+  - trigger: event
+    event_type: system_log_event
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: template
+      value_template: '{% set lvl = (trigger.event.data.level | string | upper) %}
+        {{ lvl in [''WARNING''] }}'
+  actions:
+  - variables:
+      ts: '{{ now().strftime(''%Y-%m-%d %H:%M:%S%z'') }}'
+      name: '{{ trigger.event.data.name | default(''unknown'') }}'
+      level: '{{ trigger.event.data.level | default(''UNKNOWN'') }}'
+      msg: "{% set m = trigger.event.data.message | default('') %} {% if m is string
+        %}\n  {{ m }}\n{% elif m is iterable and (m | count) > 0 %}\n  {{ m | first
+        }}\n{% else %}\n  (no message)\n{% endif %}"
+      src: "{% set s = trigger.event.data.source | default([]) %} {% if s is iterable
+        and (s | count) >= 2 %}\n  {{ s[0] }}:{{ s[1] }}\n{% elif s is iterable and
+        (s | count) == 1 %}\n  {{ s[0] }}\n{% else %}\n  unknown\n{% endif %}"
+      line: '[{{ ts }}] {{ level | upper }} - {{ name }} - {{ msg }} ({{ src }})'
+  - action: shell_command.log_automation_error
+    data:
+      message: '{{ line }}'
+  mode: queued
+- id: 8f2c97a0-b760-417c-8a2f-b893313ab6ae
+  alias: '[TEST]: Google-AI Generate data to check for package at front door.'
+  description: Captures fresh snapshot then uses Google AI to count packages
+  triggers: []
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: camera.snapshot
+    target:
+      entity_id: camera.front_door_snapshot
+    data:
+      filename: /config/www/images/snapshots/front_door_camera_snapshot.jpg
+  - delay:
+      seconds: 2
+  - action: ai_task.generate_data
+    metadata: {}
+    data:
+      instructions: This image is a view from my front door camera on a residential
+        single-family home looking out at the home's front steps leading to the front
+        door. In the background may be cars, people, and trees. I want you to carefully
+        examine the image and count how many packages you see on the top step by the
+        door. Only look at the top step for packages and ignore any other areas in
+        the image. Return a numeric answer of 0 if no packages are seen, otherwise
+        return the number of packages that are visible.
+      task_name: Look for packages delivered
+      entity_id: ai_task.google_ai_task
+      attachments:
+        media_content_id: media-source://camera/camera.front_door_snapshot
+        media_content_type: image/jpeg
+        metadata:
+          title: Front Door Motion Sensor Snapshot
+          thumbnail: /api/camera_proxy/camera.front_door_snapshot
+          media_class: video
+          children_media_class:
+          navigateIds:
+          - {}
+          - media_content_type: app
+            media_content_id: media-source://camera
+    response_variable: counter.packages_delivered_counter
+  mode: single
+- id: '1760385162178'
+  alias: '[MONITOR]: Check UDM-SE availability'
+  description: ''
+  triggers:
+  - type: not_connected
+    device_id: 67f19186fdda57b562d9483a41f618b6
+    entity_id: d7dce4754a993d551f9b4588d3c202f6
+    domain: binary_sensor
+    trigger: device
+    id: Failed
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 10
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: notify.mobile_app_neils_iphone
+    metadata: {}
+    data:
+      title: UDM-SE Unreachable
+      message: Ping from home assistant to UDM failed.
+  mode: single
+- id: 79a6a414-7bbe-48a2-8163-735871f6e793
+  alias: '[ACCESS]: Garage Door - Open/Close'
+  description: Handles all actions when the garage door opens, closes, or is closing.
+  triggers:
+  - device_id: 97321d20533be5d3f3a68796b9a742d0
+    domain: cover
+    entity_id: 3e324aa2ff36ee9b547ca69f90f2b87e
+    type: opening
+    id: Opening
+    trigger: device
+  - device_id: 97321d20533be5d3f3a68796b9a742d0
+    domain: cover
+    entity_id: 3e324aa2ff36ee9b547ca69f90f2b87e
+    type: opened
+    id: Opened
+    trigger: device
+  - device_id: 97321d20533be5d3f3a68796b9a742d0
+    domain: cover
+    entity_id: 3e324aa2ff36ee9b547ca69f90f2b87e
+    type: closing
+    id: Closing
+    trigger: device
+  - device_id: 97321d20533be5d3f3a68796b9a742d0
+    domain: cover
+    entity_id: 3e324aa2ff36ee9b547ca69f90f2b87e
+    type: closed
+    id: Closed
+    trigger: device
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: Opening
+      sequence:
+      - data:
+          message: The garage door is opening.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.kitchen_show_speak
+        action: notify.send_message
+      - if:
+        - condition: or
+          conditions:
+          - condition: state
+            entity_id: alarm_control_panel.my_home_alarm
+            state: armed_home
+          - condition: state
+            entity_id: alarm_control_panel.my_home_alarm
+            state: armed_away
+        then:
+        - action: script.disarm_ring_alarm
+          data:
+            alarm_entity: alarm_control_panel.my_home_alarm
+            notify: notify.upstairs_office_show_announce
+            message: Disarming the alarm.
+        - action: input_datetime.set_datetime
+          target:
+            entity_id: input_datetime.garage_door_open_time
+          data:
+            datetime: '{{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}'
+        - action: timer.cancel
+          target:
+            entity_id: timer.garage_door_open_timer
+        - action: timer.start
+          target:
+            entity_id: timer.garage_door_open_timer
+    - conditions:
+      - condition: trigger
+        id: Opened
+      sequence:
+      - if:
+        - condition: state
+          entity_id: binary_sensor.garage_door_recently_opened
+          state: 'off'
+        then:
+        - action: script.disarm_ring_alarm
+          data:
+            alarm_entity: alarm_control_panel.my_home_alarm
+            notify: notify.garage_echo_dot_5th_gen_speak
+            message: Welcome Home. I have disarmed the Ring alarm for your arrival.
+        enabled: false
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.garage_door_open_time
+        data:
+          datetime: '{{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}'
+      - action: timer.start
+        target:
+          entity_id: timer.garage_door_open_timer
+      - data:
+          message: ' The garage door is open.'
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.kitchen_show_speak
+          - notify.garage_echo_dot_5th_gen_speak
+        action: notify.send_message
+        enabled: false
+    - conditions:
+      - condition: trigger
+        id: Closing
+      sequence:
+      - data:
+          message: The garage door is closing.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.kitchen_show_speak
+        action: notify.send_message
+    - conditions:
+      - condition: trigger
+        id: Closed
+      sequence:
+      - delay:
+          seconds: 2
+      - action: timer.cancel
+        target:
+          entity_id: timer.garage_door_open_timer
+      - data:
+          message: The garage door is closed.
+        target:
+          entity_id:
+          - notify.upstairs_office_show_speak
+          - notify.kitchen_show_speak
+          - notify.garage_echo_dot_5th_gen_speak
+        action: notify.send_message
+        enabled: false
+  mode: restart
+- id: 52121d81-9ed0-4963-a392-106061329614
+  alias: '[LAUNDRY]: Wash cycle start detected → set Running'
+  description: Washer power > 50W for 1 minute means a new cycle is running.
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.washing_machine_current_consumption
+    above: 50
+    for:
+      minutes: 1
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.washing_machine_run_cycle_on
+    state: 'off'
+  actions:
+  - choose:
+    - conditions:
+      - condition: state
+        entity_id: input_boolean.neil_washing_clothes
+        state: 'on'
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          title: Wash Cycle Started
+          message: Hi Neil, your wash cycle has started and is now running.
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Good luck Neil.  Your wash cycle has begun.  I will let you know
+            once the wash is completed.
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+    - conditions:
+      - condition: state
+        entity_id: input_boolean.chloe_washing_clothes
+        state: 'on'
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Have a nice day Chloe.  I will take it from here and will let you
+            know once the wash is completed.
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+      - action: notify.mobile_app_chloe_phone
+        data:
+          title: Wash Cycle Started
+          message: Hi Chloe, your wash cycle has started and is now running.
+    - conditions:
+      - condition: state
+        entity_id: input_boolean.jaydon_washing_clothes
+        state: 'on'
+      sequence:
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Have a nice day Jaydon.  I will take it from here and will let
+            you know once the wash is completed.
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+      - action: notify.mobile_app_jaydons_iphone_2
+        data:
+          title: Wash Cycle Started
+          message: Hi Jaydon, your wash cycle has started and is now running.
+  - target:
+      entity_id: input_boolean.washing_machine_run_cycle_on
+    action: input_boolean.turn_on
+    data: {}
+  - target:
+      entity_id: input_select.washing_machine_status
+    data:
+      option: Running
+    action: input_select.select_option
+  - target:
+      entity_id: timer.wash_cycle_completed
+    action: timer.cancel
+    data: {}
+  - target:
+      entity_id: counter.wash_reminder_count
+    action: counter.reset
+    data: {}
+  mode: single
+- id: 36058ae1-53d4-4107-b2d4-93f976e1e45f
+  alias: '[LAUNDRY]: Wash cycle end detected → start completed timer.'
+  description: 'When washer power stays below 50W for 5 minutes, set status to Completed
+    and start the Wash Cycle Completed timer.
+
+    '
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.washing_machine_current_consumption
+    below: 50
+    for:
+      minutes: 5
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: ''
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.washing_machine_run_cycle_on
+      state: 'on'
+  actions:
+  - target:
+      entity_id: input_select.washing_machine_status
+    data:
+      option: Completed
+    action: input_select.select_option
+  - target:
+      entity_id: timer.wash_cycle_completed
+    action: timer.cancel
+  - target:
+      entity_id: timer.wash_cycle_completed
+    action: timer.start
+  - target:
+      entity_id: input_boolean.washing_machine_run_cycle_on
+    action: input_boolean.turn_off
+  mode: single
+- id: '1760478646102'
+  alias: '[TAG SCANNED]: Washing machine tag has been scanned. [OLD]'
+  description: Toggle washing state based on which phone scanned the NFC tag
+  triggers:
+  - trigger: event
+    event_type: tag_scanned
+    event_data:
+      tag_id: 523afd2e-e73b-404b-a5be-e6bd93632494
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''cd63f5584834a311d62e3664adc41561''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.neil_washing_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id: input_boolean.neil_washing_clothes
+            action: input_boolean.turn_off
+          - target:
+              entity_id:
+              - input_boolean.chloe_washing_clothes
+              - input_boolean.jaydon_washing_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Okay, I have cancelled notifications and show the washing machine
+                available.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+            enabled: false
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.neil_washing_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id: input_boolean.neil_washing_clothes
+            action: input_boolean.turn_on
+          - target:
+              entity_id:
+              - input_boolean.chloe_washing_clothes
+              - input_boolean.jaydon_washing_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Hi Neil, I will now send notifications and reminders to your
+                Alexa Room device and phone when the wash cycle is completed.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+            enabled: false
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''aa400461b60a8cb97b2b2efab04b06af''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.chloe_washing_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id: input_boolean.chloe_washing_clothes
+            action: input_boolean.turn_off
+          - target:
+              entity_id:
+              - input_boolean.jaydon_washing_clothes
+              - input_boolean.neil_washing_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Okay, I have cancelled notifications and show the washing machine
+                available.
+            action: notify.send_message
+            target:
+              entity_id:
+              - notify.laundry_room_echo_pop_speak
+              - notify.chloe_s_echo_show_speak
+            enabled: false
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.chloe_washing_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id: input_boolean.chloe_washing_clothes
+            action: input_boolean.turn_on
+          - target:
+              entity_id:
+              - input_boolean.jaydon_washing_clothes
+              - input_boolean.neil_washing_clothes
+            action: input_boolean.turn_off
+          - target:
+              entity_id:
+              - notify.chloe_s_echo_show_speak
+              - notify.laundry_room_echo_pop_speak
+            data:
+              message: Hi Chloe, I will now send notifications and reminders to your
+                Alexa Room device and phone when the wash cycle is completed.
+            action: notify.send_message
+            enabled: false
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''c5604916c46db2f9a3ad74d2aedfc459''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.jaydon_washing_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id: input_boolean.jaydon_washing_clothes
+            action: input_boolean.turn_off
+          - target:
+              entity_id:
+              - input_boolean.neil_washing_clothes
+              - input_boolean.chloe_washing_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Okay, I have cancelled notifications and show the washing machine
+                available.
+            action: notify.send_message
+            target:
+              entity_id:
+              - notify.laundry_room_echo_pop_speak
+              - notify.jaydon_s_echo_show_speak
+            enabled: false
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.jaydon_washing_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id: input_boolean.jaydon_washing_clothes
+            action: input_boolean.turn_on
+          - target:
+              entity_id:
+              - input_boolean.neil_washing_clothes
+              - input_boolean.chloe_washing_clothes
+            action: input_boolean.turn_off
+          - target:
+              entity_id:
+              - notify.jaydon_s_echo_show_speak
+              - notify.laundry_room_echo_pop_speak
+            data:
+              message: Hi Jaydon, I will now send notifications and reminders to your
+                Alexa Room device and phone when the wash cycle is completed.
+            action: notify.send_message
+            enabled: false
+  mode: single
+- id: '1760488543545'
+  alias: '[DEBUG]:  Checking phone device ids'
+  description: ''
+  triggers:
+  - type: battery_level
+    device_id: c35f85ae459376bd95a45f2a1e38ee1c
+    entity_id: c8a14b60cdec3d4bd9b06e7e44179769
+    domain: sensor
+    trigger: device
+    below: 30
+  - type: value
+    device_id: c5604916c46db2f9a3ad74d2aedfc459
+    entity_id: aa400461b60a8cb97b2b2efab04b06af
+    domain: sensor
+    trigger: device
+    below: 45
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: notify.send_message
+    metadata: {}
+    data:
+      message: Checking phone device ids
+    target:
+      entity_id: notify.upstairs_office_show_speak
+  mode: single
+- id: '1760496618545'
+  alias: '[LAUNDRY]: Reminders while wash-cycle completed timer is running'
+  description: 'Immediate + periodic reminders based on who''s toggled ON; if no one
+    is assigned, send a default reminder to the Upstairs Office Alexa.
+
+    '
+  triggers:
+  - trigger: event
+    event_type: timer.started
+    event_data:
+      entity_id: timer.wash_cycle_completed
+    id: started
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: timer.wash_cycle_completed
+    id: finished
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: ''
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - started
+      sequence:
+      - target:
+          entity_id: counter.wash_reminder_count
+        action: counter.reset
+        data: {}
+    - conditions:
+      - condition: trigger
+        id:
+        - finished
+      sequence:
+      - target:
+          entity_id: counter.wash_reminder_count
+        action: counter.increment
+      - choose:
+        - conditions:
+          - condition: template
+            value_template: '{{ states(''counter.wash_reminder_count'') | int == 1
+              }}'
+          sequence:
+          - choose:
+            - conditions:
+              - condition: state
+                entity_id: input_boolean.neil_washing_clothes
+                state: 'on'
+              sequence:
+              - target:
+                  entity_id: notify.upstairs_office_show_speak
+                data:
+                  message: 'Reminder 1: Neil, Please move clothes to the dryer.'
+                action: notify.send_message
+              - data:
+                  title: Wash Cycle Completed
+                  message: 'Reminder 1: Neil, Please move clothes to the dryer.'
+                action: notify.mobile_app_neils_iphone
+            - conditions:
+              - condition: state
+                entity_id: input_boolean.chloe_washing_clothes
+                state: 'on'
+              sequence:
+              - target:
+                  entity_id: notify.chloe_s_echo_show_speak
+                data:
+                  message: 'Reminder 1: Chloe, Please move clothes to the dryer.'
+                action: notify.send_message
+              - data:
+                  title: Wash Cycle Completed
+                  message: 'Reminder 1: Chloe, Please move clothes to the dryer.'
+                action: notify.mobile_app_chloe_phone
+            - conditions:
+              - condition: state
+                entity_id: input_boolean.jaydon_washing_clothes
+                state: 'on'
+              sequence:
+              - target:
+                  entity_id: notify.jaydon_s_echo_show_speak
+                data:
+                  message: 'Reminder 1: Jaydon, Please move clothes to the dryer.'
+                action: notify.send_message
+              - data:
+                  title: Wash Cycle Completed
+                  message: 'Reminder 1: Jaydon, Please move clothes to the dryer.'
+                action: notify.mobile_app_jaydons_iphone_2
+            default:
+            - target:
+                entity_id:
+                - notify.upstairs_office_show_speak
+                - notify.jaydon_s_echo_show_speak
+                - notify.kitchen_show_speak
+                - notify.chloe_s_echo_show_speak
+                - notify.master_bathroom_echo_show_speak
+              data:
+                message: 'Reminder 1: Laundry is finished. No one is assigned—please
+                  move clothes to the dryer.'
+              action: notify.send_message
+        - conditions:
+          - condition: template
+            value_template: '{{ states(''counter.wash_reminder_count'') | int == 2
+              }}'
+          sequence:
+          - choose:
+            - conditions:
+              - condition: state
+                entity_id: input_boolean.neil_washing_clothes
+                state: 'on'
+              sequence:
+              - target:
+                  entity_id: notify.upstairs_office_show_speak
+                data:
+                  message: 'Reminder 2: Neil, Please move clothes to the dryer as
+                    soon as possible.'
+                action: notify.send_message
+              - data:
+                  title: Wash Cycle Completed
+                  message: 'Reminder 2: Neil, Please move clothes to the dryer as
+                    soon as possible.'
+                action: notify.mobile_app_neils_iphone
+            - conditions:
+              - condition: state
+                entity_id: input_boolean.chloe_washing_clothes
+                state: 'on'
+              sequence:
+              - target:
+                  entity_id: notify.chloe_s_echo_show_speak
+                data:
+                  message: 'Reminder 2: Chloe, Please move clothes to the dryer as
+                    soon as possible.'
+                action: notify.send_message
+              - data:
+                  title: Wash Cycle Completed
+                  message: 'Reminder 2: Chloe, Please move clothes to the dryer as
+                    soon as possible.'
+                action: notify.mobile_app_chloe_phone
+            - conditions:
+              - condition: state
+                entity_id: input_boolean.jaydon_washing_clothes
+                state: 'on'
+              sequence:
+              - target:
+                  entity_id: notify.jaydon_s_echo_show_speak
+                data:
+                  message: 'Reminder 2: Jaydon, Please move clothes to the dryer as
+                    soon as possible.'
+                action: notify.send_message
+              - data:
+                  title: Wash Cycle Completed
+                  message: 'Reminder 2: Jaydon, Please move clothes to the dryer as
+                    soon as possible.'
+                action: notify.mobile_app_jaydons_iphone_2
+            default:
+            - target:
+                entity_id:
+                - notify.upstairs_office_show_speak
+                - notify.jaydon_s_echo_show_speak
+                - notify.kitchen_show_speak
+                - notify.chloe_s_echo_show_speak
+                - notify.master_bathroom_echo_show_speak
+              data:
+                message: 'Reminder 2: Laundry is finished. No one is assigned—please
+                  move clothes to the dryer as soon as possible.'
+              action: notify.send_message
+        - conditions:
+          - condition: template
+            value_template: '{{ states(''counter.wash_reminder_count'') | int >= 3
+              }}'
+          sequence:
+          - choose:
+            - conditions:
+              - condition: state
+                entity_id: input_boolean.neil_washing_clothes
+                state: 'on'
+              sequence:
+              - target:
+                  entity_id: notify.upstairs_office_show_speak
+                data:
+                  message: 'FINAL REMINDER: Neil, This is the final reminder—move
+                    clothes to the dryer now.'
+                action: notify.send_message
+              - data:
+                  title: Wash Cycle Completed
+                  message: 'FINAL REMINDER: Neil, This is the final reminder—move
+                    clothes to the dryer now.'
+                action: notify.mobile_app_neils_iphone
+            - conditions:
+              - condition: state
+                entity_id: input_boolean.chloe_washing_clothes
+                state: 'on'
+              sequence:
+              - target:
+                  entity_id: notify.chloe_s_echo_show_speak
+                data:
+                  message: 'FINAL REMINDER: Chloe, This is the final reminder—move
+                    clothes to the dryer now.'
+                action: notify.send_message
+              - data:
+                  title: Wash Cycle Completed
+                  message: 'FINAL REMINDER: Chloe, This is the final reminder—move
+                    clothes to the dryer now.'
+                action: notify.mobile_app_chloe_phone
+            - conditions:
+              - condition: state
+                entity_id: input_boolean.jaydon_washing_clothes
+                state: 'on'
+              sequence:
+              - target:
+                  entity_id: notify.jaydon_s_echo_show_speak
+                data:
+                  message: 'FINAL REMINDER: Jaydon, This is the final reminder—move
+                    clothes to the dryer now.'
+                action: notify.send_message
+              - data:
+                  title: Wash Cycle Completed
+                  message: 'FINAL REMINDER: Jaydon, This is the final reminder—move
+                    clothes to the dryer now.'
+                action: notify.mobile_app_jaydons_iphone_2
+            default:
+            - target:
+                entity_id:
+                - notify.upstairs_office_show_speak
+                - notify.jaydon_s_echo_show_speak
+                - notify.kitchen_show_speak
+                - notify.chloe_s_echo_show_speak
+                - notify.master_bathroom_echo_show_speak
+              data:
+                message: 'FINAL REMINDER: Laundry is finished. No one is assigned—move
+                  clothes to the dryer now.'
+              action: notify.send_message
+      - choose:
+        - conditions:
+          - condition: template
+            value_template: '{{ states(''counter.wash_reminder_count'') | int < 3
+              }}'
+          sequence:
+          - target:
+              entity_id: timer.wash_cycle_completed
+            action: timer.start
+            data: {}
+  mode: single
+- id: '1760498555866'
+  alias: '[LAUNDRY]: Wash cycle reset → cancel timer and set Idle'
+  description: As soon as no one is marked washing, stop reminders and reset to Idle.
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.neil_washing_clothes
+    - input_boolean.chloe_washing_clothes
+    - input_boolean.jaydon_washing_clothes
+  conditions:
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.neil_washing_clothes
+      state: 'off'
+    - condition: state
+      entity_id: input_boolean.chloe_washing_clothes
+      state: 'off'
+    - condition: state
+      entity_id: input_boolean.jaydon_washing_clothes
+      state: 'off'
+  actions:
+  - target:
+      entity_id: timer.wash_cycle_completed
+    action: timer.cancel
+  - target:
+      entity_id: input_select.washing_machine_status
+    data:
+      option: Idle
+    action: input_select.select_option
+  - target:
+      entity_id: counter.wash_reminder_count
+    action: counter.reset
+  mode: single
+- id: '1760505762573'
+  alias: '[NOTIFICATION]: Motion detected in the laundry room'
+  description: Announces laundry status on motion with 5-min cooldown
+  triggers:
+  - trigger: state
+    entity_id: binary_sensor.laundry_room_occupancy_status
+    from: 'off'
+    to: 'on'
+    for:
+      seconds: 5
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.laundry_notification_recently_played
+      state: 'off'
+  actions:
+  - action: input_boolean.turn_on
+    target:
+      entity_id:
+      - input_boolean.laundry_notification_recently_played
+    data: {}
+  - action: timer.start
+    target:
+      entity_id: timer.laundry_notification_cooldown
+    data: {}
+  - delay:
+      seconds: 2
+  - action: notify.send_message
+    target:
+      entity_id: notify.laundry_room_echo_pop_speak
+    data:
+      message: "{% set washer = states('sensor.washer_current_user') %} {% set dryer
+        = states('sensor.dryer_current_user') %} {% if washer == 'Idle' and dryer
+        == 'Idle' %}\n  Hi! Both the washer and dryer are available.\n{% elif washer
+        == 'Idle' and dryer != 'Idle' %}\n  Hi! The washer is available, but {{ dryer
+        }} is currently using the dryer.\n{% elif washer != 'Idle' and dryer == 'Idle'
+        %}\n  Hi! {{ washer }} is currently using the washer, but the dryer is available.\n{%
+        elif washer == dryer %}\n  Hi! {{ washer }} is currently using both the washer
+        and the dryer.\n{% else %}\n  Hi! {{ washer }} is using the washer, and {{
+        dryer }} is using the dryer.\n{% endif %} You can now use your voice to set
+        your washer or dryer run cycle notifications.  To do so, just tell ALEXA to
+        enable a washer cycle by saying, Alexa, turn on the washer cycle for Chloe.
+        \ And that is all!  I should respond confirming your request.  And if you
+        prefer, you may still scan the NFC tag with your phone."
+  mode: single
+- id: '1760512994631'
+  alias: '[VOICE TEST]: Ask Office and capture Yes/No'
+  description: Speaks a question on Office Alexa, waits up to 30s for Yes/No via Alexa
+    routines, then confirms.
+  triggers:
+  - trigger: state
+    entity_id: input_button.office_voice_prompt
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - target:
+      entity_id:
+      - input_boolean.office_voice_yes
+      - input_boolean.office_voice_no
+    action: input_boolean.turn_off
+  - target:
+      entity_id: notify.upstairs_office_show_speak
+    data:
+      message: Would you like me to notify you when the wash cycle completes? Say
+        "Alexa, yes reminders" or "Alexa, no reminders".
+    action: notify.send_message
+  - wait_for_trigger:
+    - entity_id: input_boolean.office_voice_yes
+      to: 'on'
+      trigger: state
+    - entity_id: input_boolean.office_voice_no
+      to: 'on'
+      trigger: state
+    timeout: 00:00:30
+    continue_on_timeout: true
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ wait.trigger is not none and wait.trigger.entity_id ==
+          ''input_boolean.office_voice_yes'' }}'
+      sequence:
+      - target:
+          entity_id: notify.upstairs_office_show_speak
+        data:
+          message: Okay, I’ll send reminders when the cycle completes.
+        action: notify.send_message
+    - conditions:
+      - condition: template
+        value_template: '{{ wait.trigger is not none and wait.trigger.entity_id ==
+          ''input_boolean.office_voice_no'' }}'
+      sequence:
+      - target:
+          entity_id: notify.upstairs_office_show_speak
+        data:
+          message: No problem. I won’t send reminders.
+        action: notify.send_message
+    default:
+    - target:
+        entity_id: notify.upstairs_office_show_speak
+      data:
+        message: I didn't catch that. You can try again by saying 'Alexa, yes reminders'
+          or 'Alexa, no reminders'.
+      action: notify.send_message
+  - target:
+      entity_id:
+      - input_boolean.office_voice_yes
+      - input_boolean.office_voice_no
+    action: input_boolean.turn_off
+  mode: single
+- id: '1760470781876'
+  alias: '[ADMIN]: Enable/Disable Tracking and Unoccupid Automations'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.unoccupied_automations_enable_and_disable
+    to: 'on'
+    id: Enabled
+  - trigger: state
+    entity_id:
+    - input_boolean.unoccupied_automations_enable_and_disable
+    to: 'off'
+    id: Disabled
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Enabled
+      sequence:
+      - action: automation.turn_on
+        metadata: {}
+        data: {}
+        target:
+          entity_id:
+          - automation.tracking_neil_location_tracking
+          - automation.disarm_the_ring_alarm_when_someone_arrives_at_home
+          - automation.security_arm_ring_in_away_mode_when_home_is_unoccupied_for_15_min
+          - automation.watchdog_presence_enforcement_on_startup_every_10min
+          - automation.media_turn_off_all_tvs_when_home_is_unoccupied
+          - automation.set_home_lighting_while_no_one_is_home
+          - automation.climate_turn_off_upstairs_thermostat_when_home_is_unoccupied
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: The administrator has enabling unoccupide tracking automations.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+    - conditions:
+      - condition: trigger
+        id:
+        - Disabled
+      sequence:
+      - action: automation.turn_off
+        metadata: {}
+        data:
+          stop_actions: true
+        target:
+          entity_id:
+          - automation.tracking_neil_location_tracking
+          - automation.security_arm_ring_in_away_mode_when_home_is_unoccupied_for_15_min
+          - automation.media_turn_off_all_tvs_when_home_is_unoccupied
+          - automation.watchdog_presence_enforcement_on_startup_every_10min
+          - automation.disarm_the_ring_alarm_when_someone_arrives_at_home
+          - automation.climate_turn_off_upstairs_thermostat_when_home_is_unoccupied
+          - automation.set_home_lighting_while_no_one_is_home
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: The administrator has disabled unoccupided tracking automations.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+  mode: single
+- id: '1760578831073'
+  alias: '[TAG SCANNED]:  Trash can removal tag has been scanned.'
+  description: ''
+  triggers:
+  - trigger: tag
+    tag_id: a46ed533-ef75-43db-8133-1b0890212a84
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: ''
+  actions:
+  - action: input_boolean.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: input_boolean.trash_cans_removed
+  mode: single
+- id: '1760584409579'
+  alias: '[SCHEDULE]: Reset Trash Cans Removed Toggle Weekly Sunday at Midnight'
+  description: ''
+  triggers:
+  - trigger: time
+    at: 00:00:00
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: time
+      weekday:
+      - sun
+  actions:
+  - action: input_boolean.turn_off
+    metadata: {}
+    data: {}
+    target:
+      entity_id: input_boolean.trash_cans_removed
+  mode: single
+- id: '1760637315299'
+  alias: '[ADMIN]: Resetting laundry room notification timer'
+  description: Resets notification flag after 5-minute cooldown expires
+  triggers:
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: timer.laundry_notification_cooldown
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: input_boolean.turn_off
+    data: {}
+    target:
+      entity_id: input_boolean.laundry_notification_recently_played
+  mode: single
+- id: '1760642904379'
+  alias: '[TAG SCANNED]: Dryer tag has been scanned. [OLD]'
+  description: Toggle dryer state based on which phone scanned the NFC tag
+  triggers:
+  - trigger: tag
+    tag_id: c1b959ca-93e5-4ead-9b3b-2c4fec16ac58
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''cd63f5584834a311d62e3664adc41561''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.neil_drying_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id:
+              - input_boolean.neil_drying_clothes
+            action: input_boolean.turn_off
+            data: {}
+          - target:
+              entity_id:
+              - input_boolean.chloe_drying_clothes
+              - input_boolean.jaydon_drying_clothes
+            action: input_boolean.turn_off
+            data: {}
+            enabled: false
+          - data:
+              message: Hi Neil, NFC tag has been scanned.  Cancelling your use of
+                the dryer.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.neil_drying_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id:
+              - input_boolean.neil_drying_clothes
+            action: input_boolean.turn_on
+            data: {}
+          - target:
+              entity_id:
+              - input_boolean.chloe_drying_clothes
+              - input_boolean.jaydon_drying_clothes
+            action: input_boolean.turn_off
+            data: {}
+            enabled: false
+          - data:
+              message: Hi Neil, NFC tag has been scanned.  Preparing your use of the
+                dryer.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''c5604916c46db2f9a3ad74d2aedfc459''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.chloe_drying_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id:
+              - input_boolean.chloe_drying_clothes
+            action: input_boolean.turn_off
+            data: {}
+          - target:
+              entity_id:
+              - input_boolean.jaydon_drying_clothes
+              - input_boolean.neil_drying_clothes
+            action: input_boolean.turn_off
+            data: {}
+            enabled: false
+          - data:
+              message: Hi Chloe, NFC tag has been scanned.  Cancelling your use of
+                the dryer.
+            action: notify.send_message
+            target:
+              entity_id:
+              - notify.laundry_room_echo_pop_speak
+              - notify.chloe_s_echo_show_speak
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.chloe_drying_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id:
+              - input_boolean.chloe_drying_clothes
+            action: input_boolean.turn_on
+            data: {}
+          - target:
+              entity_id:
+              - input_boolean.jaydon_drying_clothes
+              - input_boolean.neil_drying_clothes
+            action: input_boolean.turn_off
+            data: {}
+            enabled: false
+          - target:
+              entity_id:
+              - notify.chloe_s_echo_show_speak
+              - notify.laundry_room_echo_pop_speak
+            data:
+              message: Hi Chloe, NFC tag has been scanned.  Preparing your use of
+                the dryer.
+            action: notify.send_message
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''aa400461b60a8cb97b2b2efab04b06af''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.jaydon_drying_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id:
+              - input_boolean.jaydon_drying_clothes
+            action: input_boolean.turn_off
+            data: {}
+          - target:
+              entity_id:
+              - input_boolean.neil_drying_clothes
+              - input_boolean.chloe_drying_clothes
+            action: input_boolean.turn_off
+            data: {}
+            enabled: false
+          - data:
+              message: Hi Jaydon, NFC tag has been scanned.  Cancelling your use of
+                the dryer.
+            action: notify.send_message
+            target:
+              entity_id:
+              - notify.laundry_room_echo_pop_speak
+              - notify.jaydon_s_echo_show_speak
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.jaydon_drying_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id:
+              - input_boolean.jaydon_drying_clothes
+            action: input_boolean.turn_on
+            data: {}
+          - target:
+              entity_id:
+              - input_boolean.neil_drying_clothes
+              - input_boolean.chloe_drying_clothes
+            action: input_boolean.turn_off
+            data: {}
+            enabled: false
+          - target:
+              entity_id:
+              - notify.jaydon_s_echo_show_speak
+              - notify.laundry_room_echo_pop_speak
+            data:
+              message: Hi Jaydon, NFC tag has been scanned.  Preparing your use of
+                the dryer.
+            action: notify.send_message
+  mode: single
+- id: '1760679525947'
+  alias: '[LAUNDRY]: Dryer cycle start detected → set Running'
+  description: Dryer vibration detected.
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.dryer_vibration_sensor_vibration
+    to: 'on'
+    from: 'off'
+    for:
+      hours: 0
+      minutes: 2
+      seconds: 0
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - target:
+      entity_id:
+      - input_boolean.dryer_machine_run_cycle
+    action: input_boolean.turn_on
+    data: {}
+  - target:
+      entity_id:
+      - input_select.dryer_machine_status
+    data:
+      option: Running
+    action: input_select.select_option
+  - target:
+      entity_id:
+      - timer.dryer_cycle_completed
+    action: timer.cancel
+    data: {}
+  - target:
+      entity_id:
+      - counter.dryer_reminder_count
+    action: counter.reset
+    data: {}
+  mode: single
+- id: '1760680637745'
+  alias: '[LAUNDRY]: Dryer cycle end detected → start completed timer.'
+  description: '
+
+    '
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.dryer_vibration_sensor_vibration
+    from: 'on'
+    to: 'off'
+    for:
+      hours: 0
+      minutes: 5
+      seconds: 0
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.dryer_machine_run_cycle
+      state: 'on'
+  actions:
+  - target:
+      entity_id:
+      - input_select.dryer_machine_status
+    data:
+      option: Completed
+    action: input_select.select_option
+  - target:
+      entity_id:
+      - timer.dryer_cycle_completed
+    action: timer.cancel
+    data: {}
+  - target:
+      entity_id:
+      - timer.dryer_cycle_completed
+    action: timer.start
+    data: {}
+  - target:
+      entity_id:
+      - input_boolean.dryer_machine_run_cycle
+    action: input_boolean.turn_off
+    data: {}
+  mode: single
+- id: '1760680860517'
+  alias: '[LAUNDRY]: Reminders while dryer-cycle completed timer is running'
+  description: '
+
+    '
+  triggers:
+  - trigger: event
+    event_type: timer.started
+    event_data:
+      entity_id: timer.dryer_cycle_completed
+    id: started
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: timer.dryer_cycle_completed
+    id: finished
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.id == ''started'' }}'
+      sequence:
+      - target:
+          entity_id:
+          - counter.dryer_reminder_count
+        action: counter.reset
+        data: {}
+      - variables:
+          reminder_num: 0
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.id == ''finished'' }}'
+      sequence:
+      - target:
+          entity_id:
+          - counter.dryer_reminder_count
+        action: counter.increment
+        data: {}
+      - variables:
+          reminder_num: '{{ states(''counter.wash_reminder_count'') | int }}'
+  - variables:
+      prefix: '{% if reminder_num == 0 %}First reminder:{% elif reminder_num == 1
+        %}Reminder 1:{% elif reminder_num == 2 %}Reminder 2:{% else %}FINAL REMINDER:{%
+        endif %}'
+      body_text: "{% if reminder_num < 2 %}\n  Please remove clothes from the dryer.\n{%
+        elif reminder_num == 2 %}\n  Please remove clothes from the dryer as soon
+        as possible.\n{% else %}\n  This is the third reminder—please remove clothes
+        from the dryer.\n{% endif %}"
+  - choose:
+    - conditions:
+      - condition: state
+        entity_id: input_boolean.neil_drying_clothes
+        state: 'on'
+      sequence:
+      - target:
+          entity_id: notify.upstairs_office_show_speak
+        data:
+          message: '{{ prefix }} Neil, {{ body_text }}'
+        action: notify.send_message
+      - data:
+          title: Wash Cycle Completed
+          message: '{{ prefix }} Neil, {{ body_text }}'
+        action: notify.mobile_app_neils_iphone
+    - conditions:
+      - condition: state
+        entity_id: input_boolean.chloe_drying_clothes
+        state: 'on'
+      sequence:
+      - target:
+          entity_id:
+          - notify.chloe_s_echo_show_speak
+        data:
+          message: '{{ prefix }} Chloe, {{ body_text }}'
+        action: notify.send_message
+      - data:
+          title: Wash Cycle Completed
+          message: '{{ prefix }} Chloe, {{ body_text }}'
+        action: notify.mobile_app_chloe_phone
+    - conditions:
+      - condition: state
+        entity_id: input_boolean.jaydon_drying_clothes
+        state: 'on'
+      sequence:
+      - target:
+          entity_id: notify.jaydon_s_echo_show_speak
+        data:
+          message: '{{ prefix }} Jaydon, {{ body_text }}'
+        action: notify.send_message
+      - data:
+          title: Wash Cycle Completed
+          message: '{{ prefix }} Jaydon, {{ body_text }}'
+        action: notify.mobile_app_jaydons_iphone_2
+    default:
+    - target:
+        entity_id:
+        - notify.upstairs_office_show_speak
+        - notify.jaydon_s_echo_show_speak
+        - notify.kitchen_show_speak
+        - notify.chloe_s_echo_show_speak
+        - notify.master_bathroom_echo_speak
+      data:
+        message: '{{ prefix }} Laundry is finished. No one is assigned—please move
+          clothes to the dryer.'
+      action: notify.send_message
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.id == ''finished'' and (states(''counter.dryer_reminder_count'')
+          | int) < 3 }}'
+      sequence:
+      - target:
+          entity_id:
+          - timer.dryer_cycle_completed
+        action: timer.start
+        data: {}
+  mode: single
+- id: '1760681450757'
+  alias: '[LAUNDRY]: Dryer cycle reset → cancel timer and set Idle'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.neil_drying_clothes
+    - input_boolean.chloe_drying_clothes
+    - input_boolean.jaydon_drying_clothes
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.neil_drying_clothes
+      state: 'off'
+    - condition: state
+      entity_id: input_boolean.chloe_drying_clothes
+      state: 'off'
+    - condition: state
+      entity_id: input_boolean.jaydon_drying_clothes
+      state: 'off'
+  actions:
+  - target:
+      entity_id: timer.dryer_cycle_completed
+    action: timer.cancel
+  - target:
+      entity_id: input_select.dryer_machine_status
+    data:
+      option: Idle
+    action: input_select.select_option
+  - target:
+      entity_id: counter.dryer_reminder_count
+    action: counter.reset
+  mode: single
+- id: db9115a1-4b78-40fd-a283-561c7c38ca55
+  alias: '[CAMERA]: Manual front door snapshot'
+  description: Manually capture front door snapshot
+  triggers: []
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: camera.snapshot
+    target:
+      entity_id: camera.front_door_snapshot
+    data:
+      filename: /config/www/images/snapshots/front_door_camera_snapshot.jpg
+  - action: notify.mobile_app_neils_iphone
+    data:
+      message: Front door snapshot captured
+  mode: single
+- id: '1760690630343'
+  alias: '[TEST]: Google-AI Generate data to check for package at front door.'
+  description: ''
+  triggers: []
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: ai_task.generate_data
+    metadata: {}
+    data:
+      instructions: This image is a view from my front door camera on a residential
+        single-family home looking out at he home's front steps leading to the fron
+        door.  In the background may be cars, people, and trees.  I want you t  carefully
+        examine the image and count how many packages you see on the top step by the
+        door.  Only look at the top step for packages and ignore any other areas in
+        the image.  Return a numeric answer of 0 if no packages are seen, otherwise
+        return the number of packages that are visable.
+      task_name: Look for packages delivered
+      entity_id: ai_task.google_ai_task
+      attachments:
+        media_content_id: media-source://camera/camera.front_door_snapshot
+        media_content_type: image/jpeg
+        metadata:
+          title: Front Door Motion Sensor Snapshot
+          thumbnail: /api/camera_proxy/camera.front_door_snapshot
+          media_class: video
+          children_media_class:
+          navigateIds:
+          - {}
+          - media_content_type: app
+            media_content_id: media-source://camera
+    response_variable: counter.packages_delivered_counter
+  mode: single
+- id: '1760812289999'
+  alias: '[OCCUPANCY]:  Office Occupancy Detection'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.everything_presence_office_occupancy_status
+    from: 'on'
+    to: 'off'
+    id: Unoccupided
+    for:
+      hours: 0
+      minutes: 5
+      seconds: 0
+  - trigger: state
+    entity_id:
+    - binary_sensor.everything_presence_office_occupancy_status
+    from: 'off'
+    to: 'on'
+    id: Occupied
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Occupied
+      sequence:
+      - type: turn_on
+        device_id: 48944e08b686986fe2b6c4574d672efd
+        entity_id: bc06a41ef2c3523d9bd998d8e43be7b7
+        domain: light
+    - conditions:
+      - condition: trigger
+        id:
+        - Unoccupided
+      sequence:
+      - type: turn_off
+        device_id: 48944e08b686986fe2b6c4574d672efd
+        entity_id: bc06a41ef2c3523d9bd998d8e43be7b7
+        domain: light
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Office unoccupied.  Turning the lights off now.
+        target:
+          entity_id: notify.neil_s_echo_show_speak
+        enabled: false
+  mode: single
+- id: washer_nfc_tag_scan_new
+  alias: '[TAG SCANNED]: Washer tag has been scanned [NEW]'
+  description: Toggle washing state based on which phone scanned the NFC tag
+  triggers:
+  - trigger: tag
+    tag_id: 523afd2e-e73b-404b-a5be-e6bd93632494
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: automation.turn_off
+    target:
+      entity_id: automation.laundry_manage_washing_drying_status_for_voice_manual_changes_new
+    data:
+      stop_actions: false
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''cd63f5584834a311d62e3664adc41561''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.neil_washing_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id: input_boolean.neil_washing_clothes
+            action: input_boolean.turn_off
+          - target:
+              entity_id:
+              - input_boolean.chloe_washing_clothes
+              - input_boolean.jaydon_washing_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Okay, I have canceled notifications and show the washing machine
+                available.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.neil_washing_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id: input_boolean.neil_washing_clothes
+            action: input_boolean.turn_on
+          - target:
+              entity_id:
+              - input_boolean.chloe_washing_clothes
+              - input_boolean.jaydon_washing_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Hi Neil, I will now send notifications and reminders to your
+                Alexa room device and phone when the wash cycle is completed.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''aa400461b60a8cb97b2b2efab04b06af''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.chloe_washing_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id: input_boolean.chloe_washing_clothes
+            action: input_boolean.turn_off
+          - target:
+              entity_id:
+              - input_boolean.jaydon_washing_clothes
+              - input_boolean.neil_washing_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Okay, I have canceled notifications and show the washing machine
+                available.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.chloe_washing_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id: input_boolean.chloe_washing_clothes
+            action: input_boolean.turn_on
+          - target:
+              entity_id:
+              - input_boolean.jaydon_washing_clothes
+              - input_boolean.neil_washing_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Hi Chloe, I will now send notifications and reminders to your
+                Alexa room device and phone when the wash cycle is completed.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''c5604916c46db2f9a3ad74d2aedfc459''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.jaydon_washing_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id: input_boolean.jaydon_washing_clothes
+            action: input_boolean.turn_off
+          - target:
+              entity_id:
+              - input_boolean.neil_washing_clothes
+              - input_boolean.chloe_washing_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Okay, I have canceled notifications and show the washing machine
+                available.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.jaydon_washing_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id: input_boolean.jaydon_washing_clothes
+            action: input_boolean.turn_on
+          - target:
+              entity_id:
+              - input_boolean.neil_washing_clothes
+              - input_boolean.chloe_washing_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Hi Jaydon, I will now send notifications and reminders to your
+                Alexa room device and phone when the wash cycle is completed.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+  - action: automation.turn_on
+    target:
+      entity_id: automation.laundry_manage_washing_drying_status_for_voice_manual_changes_new
+  mode: single
+- id: dryer_nfc_tag_scan_new
+  alias: '[TAG SCANNED]: Dryer tag has been scanned [NEW]'
+  description: Toggle dryer state based on which phone scanned the NFC tag
+  triggers:
+  - trigger: tag
+    tag_id: c1b959ca-93e5-4ead-9b3b-2c4fec16ac58
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: automation.turn_off
+    target:
+      entity_id: automation.laundry_manage_washing_drying_status_for_voice_manual_changes_new
+    data:
+      stop_actions: false
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''cd63f5584834a311d62e3664adc41561''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.neil_drying_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id: input_boolean.neil_drying_clothes
+            action: input_boolean.turn_off
+          - target:
+              entity_id:
+              - input_boolean.chloe_drying_clothes
+              - input_boolean.jaydon_drying_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Okay, I have canceled notifications and show the dryer available.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.neil_drying_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id: input_boolean.neil_drying_clothes
+            action: input_boolean.turn_on
+          - target:
+              entity_id:
+              - input_boolean.chloe_drying_clothes
+              - input_boolean.jaydon_drying_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Hi Neil, I will now send notifications and reminders to your
+                Alexa room device and phone when the dry cycle is completed.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''c5604916c46db2f9a3ad74d2aedfc459''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.chloe_drying_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id: input_boolean.chloe_drying_clothes
+            action: input_boolean.turn_off
+          - target:
+              entity_id:
+              - input_boolean.jaydon_drying_clothes
+              - input_boolean.neil_drying_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Okay, I have canceled notifications and show the dryer available.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.chloe_drying_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id: input_boolean.chloe_drying_clothes
+            action: input_boolean.turn_on
+          - target:
+              entity_id:
+              - input_boolean.jaydon_drying_clothes
+              - input_boolean.neil_drying_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Hi Chloe, I will now send notifications and reminders to your
+                Alexa room device and phone when the dry cycle is completed.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+    - conditions:
+      - condition: template
+        value_template: '{{ trigger.event.data.device_id == ''aa400461b60a8cb97b2b2efab04b06af''
+          }}'
+      sequence:
+      - choose:
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.jaydon_drying_clothes
+            state: 'on'
+          sequence:
+          - target:
+              entity_id: input_boolean.jaydon_drying_clothes
+            action: input_boolean.turn_off
+          - target:
+              entity_id:
+              - input_boolean.neil_drying_clothes
+              - input_boolean.chloe_drying_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Okay, I have canceled notifications and show the dryer available.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+        - conditions:
+          - condition: state
+            entity_id: input_boolean.jaydon_drying_clothes
+            state: 'off'
+          sequence:
+          - target:
+              entity_id: input_boolean.jaydon_drying_clothes
+            action: input_boolean.turn_on
+          - target:
+              entity_id:
+              - input_boolean.neil_drying_clothes
+              - input_boolean.chloe_drying_clothes
+            action: input_boolean.turn_off
+          - data:
+              message: Hi Jaydon, I will now send notifications and reminders to your
+                Alexa room device and phone when the dry cycle is completed.
+            action: notify.send_message
+            target:
+              entity_id: notify.laundry_room_echo_pop_speak
+  - action: automation.turn_on
+    target:
+      entity_id: automation.laundry_manage_washing_drying_status_for_voice_manual_changes_new
+  mode: single
+- id: laundry_management_new
+  alias: '[LAUNDRY]: Manage washing/drying status for voice/manual changes [NEW]'
+  description: Same logic as NFC automations, triggered by boolean changes
+  triggers:
+  - trigger: state
+    entity_id: input_boolean.neil_washing_clothes
+    to: 'on'
+    id: neil_washer_on
+  - trigger: state
+    entity_id: input_boolean.neil_washing_clothes
+    to: 'off'
+    id: neil_washer_off
+  - trigger: state
+    entity_id: input_boolean.jaydon_washing_clothes
+    to: 'on'
+    id: jaydon_washer_on
+  - trigger: state
+    entity_id: input_boolean.jaydon_washing_clothes
+    to: 'off'
+    id: jaydon_washer_off
+  - trigger: state
+    entity_id: input_boolean.chloe_washing_clothes
+    to: 'on'
+    id: chloe_washer_on
+  - trigger: state
+    entity_id: input_boolean.chloe_washing_clothes
+    to: 'off'
+    id: chloe_washer_off
+  - trigger: state
+    entity_id: input_boolean.neil_drying_clothes
+    to: 'on'
+    id: neil_dryer_on
+  - trigger: state
+    entity_id: input_boolean.neil_drying_clothes
+    to: 'off'
+    id: neil_dryer_off
+  - trigger: state
+    entity_id: input_boolean.jaydon_drying_clothes
+    to: 'on'
+    id: jaydon_dryer_on
+  - trigger: state
+    entity_id: input_boolean.jaydon_drying_clothes
+    to: 'off'
+    id: jaydon_dryer_off
+  - trigger: state
+    entity_id: input_boolean.chloe_drying_clothes
+    to: 'on'
+    id: chloe_dryer_on
+  - trigger: state
+    entity_id: input_boolean.chloe_drying_clothes
+    to: 'off'
+    id: chloe_dryer_off
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: neil_washer_on
+      sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+          - input_boolean.jaydon_washing_clothes
+          - input_boolean.chloe_washing_clothes
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Confirmed. I will now send notifications and reminders to Neil's
+            Alexa room device and phone when the wash cycle is completed.
+    - conditions:
+      - condition: trigger
+        id: neil_washer_off
+      sequence:
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Okay, I have canceled notifications and show the washing machine
+            available.
+    - conditions:
+      - condition: trigger
+        id: chloe_washer_on
+      sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+          - input_boolean.neil_washing_clothes
+          - input_boolean.jaydon_washing_clothes
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Confirmed.  I will now send notifications and reminders to Chloe's
+            Alexa room device and phone when the wash cycle is completed.
+    - conditions:
+      - condition: trigger
+        id: chloe_washer_off
+      sequence:
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Okay, I have canceled notifications and show the washing machine
+            available.
+    - conditions:
+      - condition: trigger
+        id: jaydon_washer_on
+      sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+          - input_boolean.neil_washing_clothes
+          - input_boolean.chloe_washing_clothes
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Confirmed. I will now send notifications and reminders to Jaydon's
+            Alexa room device and phone when the wash cycle is completed.
+    - conditions:
+      - condition: trigger
+        id: jaydon_washer_off
+      sequence:
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Okay, I have canceled notifications and show the washing machine
+            available.
+    - conditions:
+      - condition: trigger
+        id: neil_dryer_on
+      sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+          - input_boolean.jaydon_drying_clothes
+          - input_boolean.chloe_drying_clothes
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Hi Neil, I will now send notifications and reminders to your Alexa
+            room device and phone when the dry cycle is completed.
+    - conditions:
+      - condition: trigger
+        id: neil_dryer_off
+      sequence:
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Okay, I have canceled notifications and show the dryer available.
+    - conditions:
+      - condition: trigger
+        id: chloe_dryer_on
+      sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+          - input_boolean.neil_drying_clothes
+          - input_boolean.jaydon_drying_clothes
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Confirmed.   I will now send notifications and reminders to Chloe's
+            Alexa room device and phone when the dry cycle is completed.
+    - conditions:
+      - condition: trigger
+        id: chloe_dryer_off
+      sequence:
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Okay, I have canceled notifications and show the dryer available.
+    - conditions:
+      - condition: trigger
+        id: jaydon_dryer_on
+      sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+          - input_boolean.neil_drying_clothes
+          - input_boolean.chloe_drying_clothes
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Confirmed. I will now send notifications and reminders to Jaydon's
+            Alexa room device and phone when the dry cycle is completed.
+    - conditions:
+      - condition: trigger
+        id: jaydon_dryer_off
+      sequence:
+      - action: notify.send_message
+        target:
+          entity_id: notify.laundry_room_echo_pop_speak
+        data:
+          message: Okay, I have canceled notifications and show the dryer available.
+  mode: queued
+  max: 10
+- id: garage_auto_close_reminder
+  alias: '[REMINDER]: Garage door auto closing is disabled'
+  description: Checks every 4 hours if garage auto closing is off and asks if you
+    want to re-enable
+  triggers:
+  - trigger: time_pattern
+    hours: /4
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: input_boolean.garage_door_auto_closing
+      state: 'off'
+  actions:
+  - action: notify.mobile_app_neils_iphone
+    data:
+      title: Garage Door Auto Closing Disabled
+      message: 'Reminder: Garage door auto closing is currently disabled. Enable it
+        if needed.'
+  - action: input_boolean.turn_off
+    target:
+      entity_id:
+      - input_boolean.garage_voice_yes
+      - input_boolean.garage_voice_no
+  - action: tts.speak
+    target:
+      entity_id: tts.piper
+    data:
+      message: I see the garage door auto closing is still disabled. Would you like
+        me to re-enable it? Say yes to enable, or no to keep it disabled.
+      media_player_entity_id: media_player.home_assistant_voice_0a2745_media_player_2
+  - wait_for_trigger:
+    - trigger: state
+      entity_id: input_boolean.garage_voice_yes
+      to: 'on'
+      id: enable_garage
+    - trigger: state
+      entity_id: input_boolean.garage_voice_no
+      to: 'on'
+      id: keep_disabled
+    timeout:
+      seconds: 30
+    continue_on_timeout: true
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ wait.trigger is not none and wait.trigger.id == ''enable_garage''
+          }}'
+      sequence:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.garage_door_auto_closing
+      - action: tts.speak
+        target:
+          entity_id: tts.piper
+        data:
+          message: Okay, I've re-enabled garage door auto closing.
+          media_player_entity_id: media_player.home_assistant_voice_0a2745_media_player_2
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Garage door auto closing has been re-enabled.
+    - conditions:
+      - condition: template
+        value_template: '{{ wait.trigger is not none and wait.trigger.id == ''keep_disabled''
+          }}'
+      sequence:
+      - action: tts.speak
+        target:
+          entity_id: tts.piper
+        data:
+          message: Understood. I'll keep garage door auto closing disabled.
+          media_player_entity_id: media_player.home_assistant_voice_0a2745_media_player_2
+    default:
+    - action: tts.speak
+      target:
+        entity_id: tts.piper
+      data:
+        message: I didn't hear a response. Garage door auto closing remains disabled.
+        media_player_entity_id: media_player.home_assistant_voice_0a2745_media_player_2
+  - action: input_boolean.turn_off
+    target:
+      entity_id:
+      - input_boolean.garage_voice_yes
+      - input_boolean.garage_voice_no
+  mode: single
+- id: test_voice_capture
+  alias: '[TEST]: Voice capture yes/no test'
+  description: Simple test to verify Home Assistant Voice can capture yes/no responses
+  triggers: []
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: input_boolean.turn_off
+    target:
+      entity_id:
+      - input_boolean.garage_voice_yes
+      - input_boolean.garage_voice_no
+  - action: tts.speak
+    target:
+      entity_id: tts.piper
+    data:
+      message: This is a test. Do you like pizza? Say yes or no.
+      media_player_entity_id: media_player.home_assistant_voice_0a2745_media_player_2
+  - delay:
+      seconds: 5
+  - wait_for_trigger:
+    - trigger: state
+      entity_id: input_boolean.garage_voice_yes
+      to: 'on'
+      id: said_yes
+    - trigger: state
+      entity_id: input_boolean.garage_voice_no
+      to: 'on'
+      id: said_no
+    timeout:
+      seconds: 30
+    continue_on_timeout: true
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ wait.trigger is not none and wait.trigger.id == ''said_yes''
+          }}'
+      sequence:
+      - action: tts.speak
+        target:
+          entity_id: tts.piper
+        data:
+          message: Great! I heard you say yes.
+          media_player_entity_id: media_player.home_assistant_voice_0a2745_media_player_2
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: 'Test successful: Captured YES response'
+    - conditions:
+      - condition: template
+        value_template: '{{ wait.trigger is not none and wait.trigger.id == ''said_no''
+          }}'
+      sequence:
+      - action: tts.speak
+        target:
+          entity_id: tts.piper
+        data:
+          message: I heard you say no.
+          media_player_entity_id: media_player.home_assistant_voice_0a2745_media_player_2
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: 'Test successful: Captured NO response'
+    default:
+    - action: tts.speak
+      target:
+        entity_id: tts.piper
+      data:
+        message: I did not hear a response in time.
+        media_player_entity_id: media_player.home_assistant_voice_0a2745_media_player_2
+    - action: notify.mobile_app_neils_iphone
+      data:
+        message: 'Test FAILED: No response detected'
+  - action: input_boolean.turn_off
+    target:
+      entity_id:
+      - input_boolean.garage_voice_yes
+      - input_boolean.garage_voice_no
+  mode: single
+- id: '1761098467592'
+  alias: '[TEST]: Echo to Fire TV Voice Command Test'
+  description: Test Echo Show speaking to Fire TV Cube to open YouTube TV
+  triggers:
+  - trigger: state
+    entity_id: input_boolean.test_echo_voice_command
+    to: 'on'
+  conditions: []
+  actions:
+  - action: media_player.volume_set
+    target:
+      entity_id:
+      - media_player.neil_s_echo_show
+    data:
+      volume_level: 0.67
+  - delay:
+      milliseconds: 500
+  - delay:
+      seconds: 2
+  - action: notify.send_message
+    target:
+      entity_id:
+      - notify.neil_s_echo_show_speak
+      - notify.upstairs_office_show_speak
+    data:
+      message: Computer, open YouTube TV
+    enabled: false
+  - action: notify.send_message
+    data:
+      message: Computer, open Hulu TV
+    target:
+      entity_id: notify.neil_s_echo_show_speak
+  - action: input_boolean.turn_off
+    target:
+      entity_id: input_boolean.test_echo_voice_command
+    data: {}
+    enabled: false
+  mode: single
+- id: '1761284835842'
+  alias: '[MEDICATION]: Night Medication Reminder - 9:00 PM'
+  description: Reminds Neil to take magnesium before bed at 9:00 PM
+  triggers:
+  - trigger: time
+    at: '21:00:00'
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: notify.send_message
+    data:
+      message: Time for your bedtime medication. Magnesium 500 milligrams.
+    target:
+      entity_id:
+      - notify.upstairs_office_show_speak
+      - notify.neil_s_echo_show_speak
+      - notify.kitchen_show_speak
+  - action: notify.mobile_app_neils_iphone
+    data:
+      title: Bedtime Medication
+      message: 'Time to take your magnesium: 500mg'
+  mode: single
+- id: '1761284858320'
+  alias: '[MEDICATION]: Afternoon Medication Reminder - 3:00 PM'
+  description: Reminds Neil to take afternoon medications at 3:00 PM with his meal
+  triggers:
+  - trigger: time
+    at: '15:00:00'
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: notify.send_message
+    data:
+      message: Time for your afternoon medications with your meal. Metformin 500 milligrams
+        and Amlodipine 10 milligrams.
+    target:
+      entity_id:
+      - notify.upstairs_office_show_speak
+      - notify.neil_s_echo_show_speak
+      - notify.kitchen_show_speak
+  - action: notify.mobile_app_neils_iphone
+    data:
+      title: Afternoon Medications
+      message: 'Time to take your afternoon meds with your meal: Metformin 500mg (with
+        food), Amlodipine 10mg'
+  mode: single
+- id: '1761284881165'
+  alias: '[MEDICATION]: Morning Medication Reminder - 9:00 AM'
+  description: Reminds Neil to take morning medications at 9:00 AM
+  triggers:
+  - trigger: time
+    at: 09:00:00
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - action: notify.send_message
+    data:
+      message: Good morning! Time for your morning medications. Metformin 500 milligrams
+        with a light snack, Atorvastatin 20 milligrams, and Lisinopril HCTZ 20-25
+        milligrams.
+    target:
+      entity_id:
+      - notify.upstairs_office_show_speak
+      - notify.neil_s_echo_show_speak
+      - notify.kitchen_show_speak
+  - action: notify.mobile_app_neils_iphone
+    data:
+      title: Morning Medications
+      message: 'Time to take your morning meds: Metformin 500mg (with food), Atorvastatin
+        20mg, Lisinopril/HCTZ 20-25mg'
+  mode: single
+- id: '1761460768955'
+  alias: '[MEDIA]: WATCHDOG - Turn off all TVs when home is unoccupied for 30 min'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.home_unoccupied
+    to: 'on'
+    for:
+      hours: 0
+      minutes: 30
+      seconds: 0
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: state
+      entity_id: binary_sensor.home_unoccupied
+      state: 'on'
+    - condition: state
+      entity_id: input_select.home_mode
+      state: Normal Mode
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - type: turn_off
+    device_id: 37bef8c0804cc705c76460696de25876
+    entity_id: 649e24abd247c6c73eadb4d628d552f9
+    domain: remote
+    enabled: false
+  - type: turn_off
+    device_id: 610bea2572bfd5ebda1185bd17dd9630
+    entity_id: f2ad441bc8e946886ac8e59481ad7a7f
+    domain: remote
+    enabled: false
+  - type: turn_off
+    device_id: 420449f4a2487ab41b3f8a4a7c582b79
+    entity_id: f970c7b2c3992f1eea13a24143904f3f
+    domain: remote
+    enabled: false
+  - type: turn_off
+    device_id: ee8283b8efe66b0eceeed19ec0f8143f
+    entity_id: 5a2720f4a7dad550e2e770e26a4f74e3
+    domain: remote
+    enabled: false
+  - type: turn_off
+    device_id: 2b5bc5a6335f26ce8e2cf14e3267428a
+    entity_id: 164c4c0f7b02754d7951096b1b194907
+    domain: remote
+    enabled: false
+  - type: turn_off
+    device_id: 29125ebd1220daa103ab7ef54ea71335
+    entity_id: 8311bfaacf42880c9f2c056b3893b70f
+    domain: remote
+    enabled: false
+  - type: turn_off
+    device_id: 689425bc95eab9b5a5f2990acad49eab
+    entity_id: 948af8b03b0bb678734701361bc023b0
+    domain: remote
+    enabled: false
+  - type: turn_off
+    device_id: 9434501f7fe7aed0812d909821cfed2c
+    entity_id: f4643039d353f151a009c7fdf37d7296
+    domain: remote
+    enabled: false
+  - action: media_player.turn_off
+    metadata: {}
+    data: {}
+    target:
+      entity_id:
+      - media_player.all_apple_tvs
+      - media_player.all_home_tvs
+      - media_player.all_fire_cube_tvs
+  - action: notify.mobile_app_neils_iphone
+    data:
+      message: Home is unoccupid.  Turning off all electronic tvs, fire and apple
+        devices.
+  mode: single
+- id: '1763264842420'
+  alias: '[OCCUPANCY]: Master Bedroom Occupancy Detection'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.everything_presence_master_bedroom_pir
+    from:
+    - 'on'
+    to:
+    - 'off'
+    id: Unoccupided
+    for:
+      hours: 0
+      minutes: 10
+      seconds: 0
+  - trigger: state
+    entity_id:
+    - binary_sensor.everything_presence_master_bedroom_pir
+    from:
+    - 'off'
+    to:
+    - 'on'
+    id: Occupied
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: binary_sensor.bed_presence_masterbedroom_occupied_left
+    state:
+    - 'off'
+  - condition: state
+    entity_id: input_boolean.do_not_disturb_master_bedroom
+    state:
+    - 'off'
+  - condition: state
+    entity_id: binary_sensor.time_of_day_nighttime
+    state:
+    - 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Occupied
+      sequence:
+      - type: turn_on
+        device_id: 5240d8bdd3a114e489b9d97f5535f60e
+        entity_id: a33bf1b73cfa6d35fb6a8764631b86dd
+        domain: light
+      - type: turn_on
+        device_id: 2cbf4a19634374f565e5af0dfe3adf3e
+        entity_id: ee23576e902feed166e70f30e7ed923e
+        domain: light
+      - type: turn_on
+        device_id: 947b6e39e094d4d390c8a5786e1463a8
+        entity_id: 1c959b0fd70af5825e65280a6207de31
+        domain: light
+      - type: turn_on
+        device_id: 9d88e9ad2963fff12f2b956e2a8ee01f
+        entity_id: 1a12a0e8164f530590fde8e92fcfc824
+        domain: light
+    - conditions:
+      - condition: trigger
+        id:
+        - Unoccupided
+        enabled: false
+      sequence:
+      - type: turn_off
+        device_id: e1692d9f01683aabba8b83c949fef996
+        entity_id: cb82f2fd97654f4271515fdc5b40ee43
+        domain: light
+      - type: turn_off
+        device_id: 9d88e9ad2963fff12f2b956e2a8ee01f
+        entity_id: 1a12a0e8164f530590fde8e92fcfc824
+        domain: light
+      - action: notify.send_message
+        metadata: {}
+        data:
+          message: Office unoccupied.  Turning the lights off now.
+        target:
+          entity_id: notify.neil_s_echo_show_speak
+        enabled: false
+  mode: single
+- id: '1763721473225'
+  alias: '[BUG]: Manage [TACKING]: Chloe Location enable/disable'
+  description: ''
+  triggers:
+  - trigger: time
+    at: 06:00:00
+    weekday:
+    - sun
+    - mon
+    - tue
+    - wed
+    - thu
+    - fri
+    - sat
+    id: Morning Enable
+  - trigger: time
+    at: '23:00:00'
+    weekday:
+    - sun
+    - mon
+    - tue
+    - wed
+    - thu
+    - fri
+    - sat
+    id: Night Disable
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state:
+    - 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Morning Enable
+      sequence:
+      - action: automation.turn_on
+        metadata: {}
+        data: {}
+        target:
+          entity_id: automation.tracking_chloe_location_tracking
+    - conditions:
+      - condition: trigger
+        id:
+        - Night Disable
+      sequence:
+      - action: automation.turn_off
+        metadata: {}
+        data:
+          stop_actions: true
+        target:
+          entity_id: automation.tracking_chloe_location_tracking
+  mode: single
+- id: '1763763212723'
+  alias: '[ANNOUNCE]: Motion detected in the family room'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.family_room_presense_sensor_presence
+    from:
+    - 'off'
+    to:
+    - 'on'
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 3
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: []
+  - condition: state
+    entity_id: input_boolean.alexa_announcements_enabled
+    state:
+    - 'on'
+  actions:
+  - action: notify.alexa_media_family_room_echo
+    metadata: {}
+    data:
+      message: Motion detected in the Family Room
+  mode: single
+- id: '1763763408868'
+  alias: '[ANNOUNCE]: Motion detected in the kitchen'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.kitchen_presense_sensor_presence
+    from:
+    - 'off'
+    to:
+    - 'on'
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 3
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: []
+  - condition: state
+    entity_id: input_boolean.alexa_announcements_enabled
+    state:
+    - 'on'
+  actions:
+  - action: notify.alexa_media_kitchen_show
+    metadata: {}
+    data:
+      message: Motion has been detected in the kitchen.
+  mode: single
+- id: '1764179712929'
+  alias: '[OCCUPANCY]: Guest Room Occupancy Detection'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.everything_presence_guestroom_occupancy_status
+    from:
+    - 'on'
+    to:
+    - 'off'
+    id: Unoccupided
+    for:
+      hours: 0
+      minutes: 10
+      seconds: 0
+  - trigger: state
+    entity_id:
+    - binary_sensor.everything_presence_guestroom_occupancy_status
+    from:
+    - 'off'
+    to:
+    - 'on'
+    id: Occupied
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.do_not_disturb_guest_room
+    state:
+    - 'off'
+  - condition: state
+    entity_id: binary_sensor.time_of_day_nighttime
+    state:
+    - 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - Occupied
+      sequence:
+      - type: turn_on
+        device_id: ff7ffa78f10dca7712df2549841ba0ec
+        entity_id: 1b5d0026abd15cbee5e38af24eb4f08c
+        domain: light
+      - type: turn_on
+        device_id: 8c05a92069c3df52bf506ab046deb242
+        entity_id: 25d36749a0abea35806ba24d9c22211d
+        domain: light
+        brightness_pct: 60
+    - conditions:
+      - condition: trigger
+        id:
+        - Unoccupided
+        enabled: false
+      sequence:
+      - type: turn_off
+        device_id: 73ee536a348b0c8025f437346a73476e
+        entity_id: 66ef633d1789fa895e967fe6201d1272
+        domain: light
+  mode: single

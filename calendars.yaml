@@ -1,0 +1,14 @@
+# ==========================================================
+# calendars.yaml
+# Calendar platforms (e.g., CalDAV / iCloud)
+# Store secrets in secrets.yaml and reference with !secret
+# ==========================================================
+
+- platform: caldav
+  url: !secret icloud_caldav_url         # e.g., https://p42-caldav.icloud.com/published/.../principal
+  username: !secret icloud_username      # e.g., your iCloud email
+  password: !secret icloud_app_password  # app-specific password recommended
+  custom_calendars:
+    - name: "iCloud Calendar"
+      calendar: "Neil"                   # visible name of the calendar
+      search: ""                         # optional filter string

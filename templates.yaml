@@ -1,0 +1,1135 @@
+# ==========================================================
+# templates.yaml
+#
+# Custom template sensors & binary_sensors for Home Assistant
+#
+# Table of Contents:
+#   Binary Sensors
+#     - All Doors Closed
+#     - All Rooms Occupied (binary: true/false)
+#     - All Rooms Unoccupied
+#     - Any Room Occupied
+#     - Garage Door Recently Opened
+#     - Home Occupied
+#     - Home Unoccupied
+#     - Trashcans Available at Curb
+#     - Trashcans at Home
+#
+#   Sensors
+#     - All Rooms Occupied (numeric count)
+#     - Garage Door Open Duration
+#     - Ha uptime minutes
+# ==========================================================
+
+# ============================
+# Alexa Integration Status
+# ============================
+
+- binary_sensor:
+    - name: "Alexa Notify Available"
+      unique_id: alexa_notify_available
+      device_class: connectivity
+      # ON if all Alexa notify services are available
+      state: >-
+        {{ not (
+          is_state('notify.upstairs_office_show_announce', 'unavailable')
+          or is_state('notify.upstairs_office_show_speak', 'unavailable')
+        ) }}
+      # Always available (the check itself is valid)
+      availability: "true"
+
+
+- binary_sensor:
+    # -------------------------
+    # DOORS
+    # -------------------------
+    - name: "All Doors Closed"
+      device_class: door
+      state: >
+        {{ is_state('binary_sensor.front_door', 'off') and
+           is_state('binary_sensor.kitchen_patio_door', 'off') and
+           is_state('binary_sensor.family_room_patio', 'off') and
+           is_state('binary_sensor.garage_entry', 'off') }}
+
+    # -------------------------
+    # OCCUPANCY
+    # -------------------------
+    - name: "All Rooms Occupied"
+      unique_id: all_rooms_occupied
+      device_class: occupancy
+      # True if ALL occupancy sensors are "on"
+      state: >-
+        {% set rooms = states.binary_sensor
+            | selectattr('entity_id', 'search', '_occupancy_status$')
+            | map(attribute='entity_id') | list %}
+        {% set occupied_count = rooms | select('is_state', 'on') | list | count %}
+        {{ occupied_count == (rooms | count) }}
+
+    - name: "All Rooms Unoccupied"
+      unique_id: all_rooms_unoccupied
+      device_class: occupancy
+      # True if NONE of the occupancy sensors are "on"
+      state: >-
+        {% set rooms = states.binary_sensor
+            | selectattr('entity_id', 'search', '_occupancy_status$')
+            | map(attribute='entity_id') | list %}
+        {% set occupied_count = rooms | select('is_state', 'on') | list | count %}
+        {{ occupied_count == 0 }}
+
+    - name: "Any Room Occupied"
+      unique_id: any_room_occupied
+      device_class: occupancy
+      # True if AT LEAST ONE room is occupied
+      state: >-
+        {% set rooms = states.binary_sensor
+            | selectattr('entity_id', 'search', '_occupancy_status$')
+            | map(attribute='entity_id') | list %}
+        {{ rooms | select('is_state', 'on') | list | count > 0 }}
+
+- sensor:
+    - name: "Current Mode"
+      unique_id: current_mode
+      icon: mdi:account-switch
+      state: >-
+        {% if is_state('input_boolean.guest_mode', 'on') %}
+          Guest Mode
+        {% elif is_state('input_boolean.vacation_mode', 'on') %}
+          Vacation Mode
+        {% else %}
+          Normal
+        {% endif %}
+
+# ============================
+# LAYER 2: Stable Presence Sensors
+# ============================
+# Add these to your templates.yaml file
+
+- binary_sensor:
+  # ===== NEIL - Stable Presence with Delays =====
+  - name: "Neil Home (Stable)"
+    unique_id: neil_home_stable
+    device_class: presence
+    state: >
+      {% set multi = states('binary_sensor.neil_home_multi_source') %}
+      {% set last_change = as_timestamp(states.binary_sensor.neil_home_multi_source.last_changed) %}
+      {% set now = as_timestamp(now()) %}
+      {% set time_since_change = now - last_change %}
+      
+      {% if multi == 'on' %}
+        {# If multi-source says HOME, wait 30 seconds before confirming #}
+        {{ time_since_change >= 30 }}
+      {% elif multi == 'off' %}
+        {# If multi-source says AWAY, wait 3 minutes before confirming #}
+        {% if is_state('binary_sensor.neil_home_stable', 'on') %}
+          {{ time_since_change >= 180 }}
+        {% else %}
+          false
+        {% endif %}
+      {% else %}
+        {{ is_state('binary_sensor.neil_home_stable', 'on') }}
+      {% endif %}
+    attributes:
+      source_state: "{{ states('binary_sensor.neil_home_multi_source') }}"
+      time_since_change: >
+        {% set last_change = as_timestamp(states.binary_sensor.neil_home_multi_source.last_changed) %}
+        {% set now = as_timestamp(now()) %}
+        {{ (now - last_change) | int }}
+      gps_status: "{{ state_attr('binary_sensor.neil_home_multi_source', 'gps_status') }}"
+      network_status: "{{ state_attr('binary_sensor.neil_home_multi_source', 'network_status') }}"
+      bluetooth_status: "{{ state_attr('binary_sensor.neil_home_multi_source', 'bluetooth_status') }}"
+      detection_method: "{{ state_attr('binary_sensor.neil_home_multi_source', 'detection_method') }}"
+
+# ============================
+# Jaydon & Chloe Stable Sensors (Corrected Entity References)
+# ============================
+# Replace your existing jaydon_home_stable and chloe_home_stable definitions with these
+
+  - name: "Jaydon Home (Stable)"
+    unique_id: jaydon_home_stable
+    device_class: presence
+    state: >
+      {% set multi = states('binary_sensor.jaydon_home_multi_source') %}
+      {% set last_change = as_timestamp(states.binary_sensor.jaydon_home_multi_source.last_changed) %}
+      {% set now = as_timestamp(now()) %}
+      {% set time_since_change = now - last_change %}
+      
+      {% if multi == 'on' %}
+        {# If multi-source says HOME, wait 30 seconds before confirming #}
+        {{ time_since_change >= 30 }}
+      {% elif multi == 'off' %}
+        {# If multi-source says AWAY, wait 3 minutes before confirming #}
+        {% if is_state('binary_sensor.jaydon_home_stable', 'on') %}
+          {{ time_since_change >= 180 }}
+        {% else %}
+          false
+        {% endif %}
+      {% else %}
+        {{ is_state('binary_sensor.jaydon_home_stable', 'on') }}
+      {% endif %}
+    attributes:
+      source_state: "{{ states('binary_sensor.jaydon_home_multi_source') }}"
+      time_since_change: >
+        {% set last_change = as_timestamp(states.binary_sensor.jaydon_home_multi_source.last_changed) %}
+        {% set now = as_timestamp(now()) %}
+        {{ (now - last_change) | int }}
+      gps_status: "{{ state_attr('binary_sensor.jaydon_home_multi_source', 'gps_status') }}"
+      network_status: "{{ state_attr('binary_sensor.jaydon_home_multi_source', 'network_status') }}"
+      bluetooth_status: "{{ state_attr('binary_sensor.jaydon_home_multi_source', 'bluetooth_status') }}"
+      detection_method: "{{ state_attr('binary_sensor.jaydon_home_multi_source', 'detection_method') }}"
+
+  - name: "Chloe Home (Stable)"
+    unique_id: chloe_home_stable
+    device_class: presence
+    state: >
+      {% set multi = states('binary_sensor.chloe_home_multi_source') %}
+      {% set last_change = as_timestamp(states.binary_sensor.chloe_home_multi_source.last_changed) %}
+      {% set now = as_timestamp(now()) %}
+      {% set time_since_change = now - last_change %}
+      
+      {% if multi == 'on' %}
+        {# If multi-source says HOME, wait 30 seconds before confirming #}
+        {{ time_since_change >= 30 }}
+      {% elif multi == 'off' %}
+        {# If multi-source says AWAY, wait 3 minutes before confirming #}
+        {% if is_state('binary_sensor.chloe_home_stable', 'on') %}
+          {{ time_since_change >= 180 }}
+        {% else %}
+          false
+        {% endif %}
+      {% else %}
+        {{ is_state('binary_sensor.chloe_home_stable', 'on') }}
+      {% endif %}
+    attributes:
+      source_state: "{{ states('binary_sensor.chloe_home_multi_source') }}"
+      time_since_change: >
+        {% set last_change = as_timestamp(states.binary_sensor.chloe_home_multi_source.last_changed) %}
+        {% set now = as_timestamp(now()) %}
+        {{ (now - last_change) | int }}
+      gps_status: "{{ state_attr('binary_sensor.chloe_home_multi_source', 'gps_status') }}"
+      network_status: "{{ state_attr('binary_sensor.chloe_home_multi_source', 'network_status') }}"
+      bluetooth_status: "{{ state_attr('binary_sensor.chloe_home_multi_source', 'bluetooth_status') }}"
+      detection_method: "{{ state_attr('binary_sensor.chloe_home_multi_source', 'detection_method') }}"
+      
+  # ===== Updated Home Occupancy Sensors =====
+  - name: "Home Occupied"
+    unique_id: home_occupied
+    device_class: occupancy
+    state: >-
+      {{ is_state('binary_sensor.neil_home_stable', 'on')
+         or is_state('binary_sensor.jaydon_home_stable', 'on')
+         or is_state('binary_sensor.chloe_home_stable', 'on') }}
+    availability: >-
+      {{ states('binary_sensor.neil_home_stable') in ['on','off']
+         and states('binary_sensor.jaydon_home_stable') in ['on','off']
+         and states('binary_sensor.chloe_home_stable') in ['on','off'] }}
+
+  - name: "Home Unoccupied"
+    unique_id: home_unoccupied
+    device_class: occupancy
+    state: "{{ is_state('binary_sensor.home_occupied', 'off') }}"
+    availability: "{{ states('binary_sensor.home_occupied') in ['on','off'] }}"
+
+
+# ============================
+# Location Display Sensors
+# ============================
+# Uses stable presence detection for "Home" status and person entity for zone tracking
+# Shows: "Home", "Away", or named zones (Work, School, etc.)
+# Includes entity picture from person entity
+
+- sensor:
+  - name: "Neil Location Display"
+    unique_id: neil_location_display
+    icon: mdi:map-marker
+    state: >
+      {% if is_state('binary_sensor.bed_presence_masterbedroom_occupied_left', 'on') %}
+        In Bed
+      {% elif is_state('binary_sensor.neil_home_stable', 'on') %}
+        {% set room = states('sensor.neils_iphone_bluetooth_location') %}
+        {% if room == 'office' %}
+          Office
+        {% elif room == 'master_bedroom' %}
+          Master Br
+        {% elif room == 'master_bathroom' %}
+          Master Bath
+        {% elif room == 'guest_room' %}
+          Guest Br
+        {% elif room == 'jaydons_room' %}
+          Jaydon's Br
+        {% elif room == 'family_room' %}
+          Family Rm
+        {% elif room == 'chloes_room' %}
+          Chloe's Br
+        {% elif room == 'kitchen' %}
+          Kitchen
+        {% elif room == 'garage' %}
+          Garage
+        {% else %}
+          Home
+        {% endif %}
+      {% else %}
+        {% set person_state = states('person.neil_greene') %}
+        {% if person_state == 'not_home' %}
+          Away
+        {% else %}
+          {{ person_state | title }}
+        {% endif %}
+      {% endif %}
+    attributes:
+      entity_picture: "{{ state_attr('person.neil_greene', 'entity_picture') }}"
+      latitude: "{{ state_attr('person.neil_greene', 'latitude') }}"
+      longitude: "{{ state_attr('person.neil_greene', 'longitude') }}"
+      source: "{{ state_attr('person.neil_greene', 'source') }}"
+      gps_accuracy: "{{ state_attr('person.neil_greene', 'gps_accuracy') }}"
+      detection_method: "{{ state_attr('binary_sensor.neil_home_stable', 'detection_method') }}"
+      stable_presence: "{{ states('binary_sensor.neil_home_stable') }}"
+      current_room: "{{ states('sensor.neils_iphone_bluetooth_location') }}"
+
+  - name: "Jaydon Location Display"
+    unique_id: jaydon_location_display
+    icon: mdi:map-marker
+    state: >
+      {% if is_state('binary_sensor.bed_presence_jaydonsroom_occupied_either', 'on') %}
+        In Bed
+      {% elif is_state('binary_sensor.jaydon_home_stable', 'on') %}
+        {% set room = states('sensor.jaydons_iphone_bluetooth_location') %}
+        {% if room == 'office' %}
+          Office
+        {% elif room == 'master_bedroom' %}
+          Master Br
+        {% elif room == 'master_bathroom' %}
+          Master Bath
+        {% elif room == 'guest_room' %}
+          Guest Br
+        {% elif room == 'jaydons_room' %}
+          Jaydon's Br
+        {% elif room == 'family_room' %}
+          Family Rm
+        {% elif room == 'chloes_room' %}
+          Chloe's Br
+        {% elif room == 'kitchen' %}
+          Kitchen
+        {% elif room == 'garage' %}
+          Garage
+        {% else %}
+          Home
+        {% endif %}
+      {% else %}
+        {% set person_state = states('person.jaydon_greene') %}
+        {% if person_state == 'not_home' %}
+          Away
+        {% else %}
+          {{ person_state | title }}
+        {% endif %}
+      {% endif %}
+    attributes:
+      entity_picture: "{{ state_attr('person.jaydon_greene', 'entity_picture') }}"
+      latitude: "{{ state_attr('person.jaydon_greene', 'latitude') }}"
+      longitude: "{{ state_attr('person.jaydon_greene', 'longitude') }}"
+      source: "{{ state_attr('person.jaydon_greene', 'source') }}"
+      gps_accuracy: "{{ state_attr('person.jaydon_greene', 'gps_accuracy') }}"
+      detection_method: "{{ state_attr('binary_sensor.jaydon_home_stable', 'detection_method') }}"
+      stable_presence: "{{ states('binary_sensor.jaydon_home_stable') }}"
+      current_room: "{{ states('sensor.jaydons_iphone_bluetooth_location') }}"
+
+  - name: "Chloe Location Display"
+    unique_id: chloe_location_display
+    icon: mdi:map-marker
+    state: >
+      {% if is_state('binary_sensor.bed_presence_chloesroom_occupied_either', 'on') %}
+        In Bed
+      {% elif is_state('binary_sensor.chloe_home_stable', 'on') %}
+        {% set room = states('sensor.chloes_iphone_bluetooth_location') %}
+        {% if room == 'office' %}
+          Office
+        {% elif room == 'master_bedroom' %}
+          Master Br
+        {% elif room == 'master_bathroom' %}
+          Master Bath
+        {% elif room == 'guest_room' %}
+          Guest Br
+        {% elif room == 'jaydons_room' %}
+          Jaydon's Br
+        {% elif room == 'family_room' %}
+          Family Rm
+        {% elif room == 'chloes_room' %}
+          Chloe's Br
+        {% elif room == 'kitchen' %}
+          Kitchen
+        {% elif room == 'garage' %}
+          Garage
+        {% else %}
+          Home
+        {% endif %}
+      {% else %}
+        {% set person_state = states('person.chloe_greene') %}
+        {% if person_state == 'not_home' %}
+          Away
+        {% else %}
+          {{ person_state | title }}
+        {% endif %}
+      {% endif %}
+    attributes:
+      entity_picture: "{{ state_attr('person.chloe_greene', 'entity_picture') }}"
+      latitude: "{{ state_attr('person.chloe_greene', 'latitude') }}"
+      longitude: "{{ state_attr('person.chloe_greene', 'longitude') }}"
+      source: "{{ state_attr('person.chloe_greene', 'source') }}"
+      gps_accuracy: "{{ state_attr('person.chloe_greene', 'gps_accuracy') }}"
+      detection_method: "{{ state_attr('binary_sensor.chloe_home_stable', 'detection_method') }}"
+      stable_presence: "{{ states('binary_sensor.chloe_home_stable') }}"
+      current_room: "{{ states('sensor.chloes_iphone_bluetooth_location') }}"
+
+# ============================
+# Updated Household Count Sensor
+# ============================
+
+- sensor:
+  - name: "Household Home Count"
+    unique_id: household_home_count
+    icon: mdi:account-group
+    unit_of_measurement: "people"
+    state_class: measurement
+    state: >-
+      {{ [
+        is_state('binary_sensor.neil_home_stable', 'on'),
+        is_state('binary_sensor.jaydon_home_stable', 'on'),
+        is_state('binary_sensor.chloe_home_stable', 'on')
+      ] | select('equalto', true) | list | count }}
+    attributes:
+      people_home: >-
+        {% set people = [] %}
+        {% if is_state('binary_sensor.neil_home_stable', 'on') %}
+          {% set people = people + ['Neil'] %}
+        {% endif %}
+        {% if is_state('binary_sensor.jaydon_home_stable', 'on') %}
+          {% set people = people + ['Jaydon'] %}
+        {% endif %}
+        {% if is_state('binary_sensor.chloe_home_stable', 'on') %}
+          {% set people = people + ['Chloe'] %}
+        {% endif %}
+        {{ people }}
+    availability: >-
+      {{ states('binary_sensor.neil_home_stable') in ['on','off']
+         and states('binary_sensor.jaydon_home_stable') in ['on','off']
+         and states('binary_sensor.chloe_home_stable') in ['on','off'] }}
+
+# ==========================================================
+# TRASHCAN SENSORS
+# ==========================================================
+# This section creates binary sensors and summary sensors
+# for three groups of trashcans (Waste, Recycle, Yard).
+#
+# Each group has:
+#   - "at curb" → device_class: problem
+#   - "at home" → device_class: presence
+#
+# Logic:
+# - Each "at curb" sensor (device_class: problem) turns ON if:
+#     - The device_tracker is not_home
+#     - OR the estimated distance > 45 feet
+#     - OR the RSSI signal strength < -80 dBm
+#
+# - Each "at home" sensor (device_class: presence) turns ON only if:
+#     - The device_tracker is home
+#     - AND the estimated distance ≤ 45 feet
+#     - AND the RSSI ≥ -80 dBm
+#
+# - Count sensors summarize the number of groups at home/at curb
+#   (values 0–3).
+#
+# Summary sensors:
+#   - Trashcans Home Count → how many groups are home (0–3)
+#   - Trashcans Curb Count → how many groups are at curb (0–3)
+# Each summary sensor has attributes listing which groups apply.
+#
+# ==========================================================
+
+- binary_sensor:
+    # -------------------------
+    # WASTE CANS
+    # -------------------------
+    - name: "Waste Cans At Home"
+      unique_id: waste_cans_at_home
+      device_class: presence
+      state: >-
+        {% set v = states('sensor.waste_cans_home_count') %}
+        {{ v not in ['unavailable', 'unknown', 'none'] and v|int(0) > 0 }}
+      availability: "true"
+
+    - name: "Waste Cans At Curb"
+      unique_id: waste_cans_at_curb
+      device_class: problem
+      state: >-
+        {% set v = states('sensor.waste_cans_home_count') %}
+        {{ v not in ['unavailable', 'unknown', 'none'] and v|int(0) < 2 }}
+      availability: "true"
+
+    # -------------------------
+    # RECYCLE CAN
+    # -------------------------
+    - name: "Recycle Can At Home"
+      unique_id: recycle_can_at_home
+      device_class: presence
+      state: >-
+        {% set v = states('sensor.recycle_can_home_count') %}
+        {{ v not in ['unavailable', 'unknown', 'none'] and v|int(0) == 1 }}
+      availability: "true"
+
+    - name: "Recycle Can At Curb"
+      unique_id: recycle_can_at_curb
+      device_class: problem
+      state: >-
+        {% set v = states('sensor.recycle_can_home_count') %}
+        {{ v not in ['unavailable', 'unknown', 'none'] and v|int(0) == 0 }}
+      availability: "true"
+
+    # -------------------------
+    # YARD CAN
+    # -------------------------
+    - name: "Yard Can At Home"
+      unique_id: yard_can_at_home
+      device_class: presence
+      state: >-
+        {% set v = states('sensor.yard_can_home_count') %}
+        {{ v not in ['unavailable', 'unknown', 'none'] and v|int(0) == 1 }}
+      availability: "true"
+
+    - name: "Yard Can At Curb"
+      unique_id: yard_can_at_curb
+      device_class: problem
+      state: >-
+        {% set v = states('sensor.yard_can_home_count') %}
+        {{ v not in ['unavailable', 'unknown', 'none'] and v|int(0) == 0 }}
+      availability: "true"
+
+# ============================
+# Bed Presence (Left Side)
+# ============================
+
+- sensor:
+    - name: "Master Bed Left Side Occupancy"
+      unique_id: master_bed_left_side_occupancy
+      icon: mdi:bed-single
+      unit_of_measurement: "occupied"
+      state_class: measurement
+      # Returns 1 if left side is occupied, otherwise 0
+      state: >-
+        {% if is_state('binary_sensor.bed_presence_2d2158_bed_occupied_left','on') %}
+          1
+        {% else %}
+          0
+        {% endif %}
+
+# ============================
+# Master Bed - Right Side
+# ============================
+
+- sensor:
+    - name: "Master Bed Right Side Occupancy"
+      unique_id: master_bed_right_side_occupancy
+      icon: mdi:bed-single
+      unit_of_measurement: "occupied"
+      state_class: measurement
+      # Returns 1 if right side is occupied, otherwise 0
+      state: >-
+        {% if is_state('binary_sensor.bed_presence_2d2158_bed_occupied_right','on') %}
+          1
+        {% else %}
+          0
+        {% endif %}
+
+
+- sensor:
+    # -------------------------
+    # OCCUPANCY
+    # -------------------------
+    - name: "All Rooms Occupied"
+      unique_id: 9342ae19-6b57-4c84-9c0e-2350245d61e8
+      icon: mdi:home-account
+      unit_of_measurement: "rooms"
+      # Counts the number of occupied rooms
+      state: >-
+        {% set rooms = states.binary_sensor
+            | selectattr('entity_id', 'search', '_occupancy_status$')
+            | map(attribute='entity_id') | list %}
+        {{ rooms | select('is_state', 'on') | list | count }}
+
+    # -------------------------
+    # GARAGE
+    # -------------------------
+    - name: "Garage Door Open Duration"
+      unique_id: garage_door_open_duration
+      icon: mdi:timer-sand
+      # Calculates how long the garage door has been open (HH:MM:SS)
+      state: >
+        {% if is_state('cover.ratgdo32_6a7530_door', 'open') %}
+          {% set open_time = state_attr('input_datetime.garage_door_open_time', 'timestamp') %}
+          {% if open_time %}
+            {% set duration_seconds = now().timestamp() - open_time %}
+            {% set hours = (duration_seconds / 3600) | int %}
+            {% set minutes = ((duration_seconds % 3600) / 60) | int %}
+            {% set seconds = (duration_seconds % 60) | int %}
+            {{ "%02d:%02d:%02d" | format(hours, minutes, seconds) }}
+          {% else %}
+            00:00:00
+          {% endif %}
+        {% else %}
+          00:00:00
+        {% endif %}
+
+    # -------------------------
+    # SYSTEM
+    # -------------------------
+    - unique_id: ha_uptime_minutes
+      name: "Ha uptime minutes"
+      icon: mdi:history
+      # Reports HA uptime in minutes
+      state: >-
+        {%- set up = (now().timestamp()-as_timestamp(states('sensor.uptime')))/60 %}
+        {{ up }}
+
+- sensor:
+    # ==========================================================
+    # WASTE CANS GROUP (2 cans)
+    # Devices:
+    #   - Waste Can 1: bcpro_204056_1b0e
+    #   - Waste Can 2: bcpro_204011_2_1ae1
+    #
+    # Decision logic (per can):
+    #   1) If RSSI is available -> HOME if RSSI > -75 dBm
+    #   2) Else if Distance is available -> HOME if Distance ≤ 60 ft
+    #   3) Else -> HOME if device_tracker == 'home'
+    #
+    # Why not a for-loop counter?
+    #   HA’s Jinja can scope `set` inside loops in a way that prevents
+    #   `good = good + 1` from persisting. To avoid this pitfall, we build
+    #   a list of dicts with a computed boolean `ok`, then use
+    #   `selectattr('ok') | count` for totals and `map(attribute='name')`
+    #   for readable attributes. This is deterministic and robust.
+    # ==========================================================
+    - name: "Waste Cans Home Count"
+      unique_id: waste_cans_home_count
+      unit_of_measurement: "cans"
+      icon: mdi:trash-can
+      state: >-
+        {% set cans = [
+          {
+            'name': 'Waste Can 1',
+            'ok':
+              (
+                states('sensor.bcpro_204056_1_nearest_rssi') not in ['unknown','unavailable']
+                and (states('sensor.bcpro_204056_1_nearest_rssi') | replace('dBm','') | trim | float(-100) > -75)
+              )
+              or
+              (
+                states('sensor.bcpro_204056_1_distance') not in ['unknown','unavailable']
+                and (states('sensor.bcpro_204056_1_distance') | float(9999) <= 60)
+              )
+              or is_state('device_tracker.bcpro_204056_1_bermuda_tracker','home')
+          },
+          {
+            'name': 'Waste Can 2',
+            'ok':
+              (
+                states('sensor.bcpro_204011_2_nearest_rssi') not in ['unknown','unavailable']
+                and (states('sensor.bcpro_204011_2_nearest_rssi') | replace('dBm','') | trim | float(-100) > -75)
+              )
+              or
+              (
+                states('sensor.bcpro_204011_2_distance ') not in ['unknown','unavailable']
+                and (states('sensor.bcpro_204011_2_distance ') | float(9999) <= 60)
+              )
+              or is_state('device_tracker.bcpro_204011_2_bermuda_tracker','home')
+          }
+        ] %}
+        {{ cans | selectattr('ok') | list | count }}
+      attributes:
+        cans_home: >-
+          {% set cans = [
+            {
+              'name': 'Waste Can 1',
+              'ok':
+                (
+                  states('sensor.bcpro_204056_1_nearest_rssi') not in ['unknown','unavailable']
+                  and (states('sensor.bcpro_204056_1_nearest_rssi') | replace('dBm','') | trim | float(-100) > -75)
+                )
+                or
+                (
+                  states('sensor.bcpro_204056_1_distance') not in ['unknown','unavailable']
+                  and (states('sensor.bcpro_204056_1_distance') | float(9999) <= 60)
+                )
+                or is_state('device_tracker.bcpro_204056_1_bermuda_tracker','home')
+            },
+            {
+              'name': 'Waste Can 2',
+              'ok':
+                (
+                  states('sensor.bcpro_204011_2_nearest_rssi') not in ['unknown','unavailable']
+                  and (states('sensor.bcpro_204011_2_nearest_rssi') | replace('dBm','') | trim | float(-100) > -75)
+                )
+                or
+                (
+                  states('sensor.bcpro_204011_2_distance ') not in ['unknown','unavailable']
+                  and (states('sensor.bcpro_204011_2_distance ') | float(9999) <= 60)
+                )
+                or is_state('device_tracker.bcpro_204011_2_bermuda_tracker','home')
+            }
+          ] %}
+          {% set home_list = cans | selectattr('ok') | map(attribute='name') | list %}
+          {{ home_list|length > 0 and (home_list|join(', ')) or 'None' }}
+        cans_curb: >-
+          {% set cans = [
+            {
+              'name': 'Waste Can 1',
+              'ok':
+                (
+                  states('sensor.bcpro_204056_1_nearest_rssi') not in ['unknown','unavailable']
+                  and (states('sensor.bcpro_204056_1_nearest_rssi') | replace('dBm','') | trim | float(-100) > -75)
+                )
+                or
+                (
+                  states('sensor.bcpro_204056_1_distance') not in ['unknown','unavailable']
+                  and (states('sensor.bcpro_204056_1_distance') | float(9999) <= 60)
+                )
+                or is_state('device_tracker.bcpro_204056_1_bermuda_tracker','home')
+            },
+            {
+              'name': 'Waste Can 2',
+              'ok':
+                (
+                  states('sensor.bcpro_204011_2_nearest_rssi') not in ['unknown','unavailable']
+                  and (states('sensor.bcpro_204011_2_nearest_rssi') | replace('dBm','') | trim | float(-100) > -75)
+                )
+                or
+                (
+                  states('sensor.bcpro_204011_2_distance ') not in ['unknown','unavailable']
+                  and (states('sensor.bcpro_204011_2_distance ') | float(9999) <= 60)
+                )
+                or is_state('device_tracker.bcpro_204011_2_bermuda_tracker','home')
+            }
+          ] %}
+          {% set curb_list = cans | rejectattr('ok') | map(attribute='name') | list %}
+          {{ curb_list|length > 0 and (curb_list|join(', ')) or 'None' }}
+
+    # ==========================================================
+    # RECYCLE CAN (single can: bcpro_204055_1b0d)
+    # Uses the same decision logic. State is 1/0. Attributes show HOME/CURB.
+    # ==========================================================
+    - name: "Recycle Can Home Count"
+      unique_id: recycle_can_home_count
+      unit_of_measurement: "cans"
+      icon: mdi:recycle
+      state: >-
+        {% set ok =
+          (
+            states('sensor.bcpro_204055_3_nearest_rssi') not in ['unknown','unavailable']
+            and (states('sensor.bcpro_204055_3_nearest_rssi') | replace('dBm','') | trim | float(-100) > -75)
+          )
+          or
+          (
+            states('sensor.bcpro_204055_3_distance') not in ['unknown','unavailable']
+            and (states('sensor.bcpro_204055_3_distance') | float(9999) <= 60)
+          )
+          or is_state('device_tracker.bcpro_204055_3_bermuda_tracker','home')
+        %}
+        {{ 1 if ok else 0 }}
+      attributes:
+        cans_home: >-
+          {% set ok =
+            (
+              states('sensor.bcpro_204055_3_nearest_rssi') not in ['unknown','unavailable']
+              and (states('sensor.bcpro_204055_3_nearest_rssi') | replace('dBm','') | trim | float(-100) > -75)
+            )
+            or
+            (
+              states('sensor.bcpro_204055_3_distance') not in ['unknown','unavailable']
+              and (states('sensor.bcpro_204055_3_distance') | float(9999) <= 60)
+            )
+            or is_state('device_tracker.bcpro_204055_3_bermuda_tracker','home')
+          %}
+          {{ 'Recycle Can' if ok else 'None' }}
+        cans_curb: >-
+          {% set ok =
+            (
+              states('sensor.bcpro_204055_3_nearest_rssi') not in ['unknown','unavailable']
+              and (states('sensor.bcpro_204055_3_nearest_rssi') | replace('dBm','') | trim | float(-100) > -75)
+            )
+            or
+            (
+              states('sensor.bcpro_204055_3_distance') not in ['unknown','unavailable']
+              and (states('sensor.bcpro_204055_3_distance') | float(9999) <= 60)
+            )
+            or is_state('device_tracker.bcpro_204055_3_bermuda_tracker','home')
+          %}
+          {{ 'None' if ok else 'Recycle Can' }}
+
+    # ==========================================================
+    # YARD CAN (single can: bcpro_203991_1acd)
+    # Uses the same decision logic. State is 1/0. Attributes show HOME/CURB.
+    # ==========================================================
+    - name: "Yard Can Home Count"
+      unique_id: yard_can_home_count
+      unit_of_measurement: "cans"
+      icon: mdi:leaf
+      state: >-
+        {% set ok =
+          (
+            states('sensor.bcpro_203991_4_nearest_rss') not in ['unknown','unavailable']
+            and (states('sensor.bcpro_203991_4_nearest_rss') | replace('dBm','') | trim | float(-100) > -75)
+          )
+          or
+          (
+            states('sensor.bcpro_203991_4_distance ') not in ['unknown','unavailable']
+            and (states('sensor.bcpro_203991_4_distance ') | float(9999) <= 60)
+          )
+          or is_state('device_tracker.bcpro_203991_4_bermuda_tracker','home')
+        %}
+        {{ 1 if ok else 0 }}
+      attributes:
+        cans_home: >-
+          {% set ok =
+            (
+              states('sensor.bcpro_203991_4_nearest_rss') not in ['unknown','unavailable']
+              and (states('sensor.bcpro_203991_4_nearest_rss') | replace('dBm','') | trim | float(-100) > -75)
+            )
+            or
+            (
+              states('sensor.bcpro_203991_4_distance ') not in ['unknown','unavailable']
+              and (states('sensor.bcpro_203991_4_distance ') | float(9999) <= 60)
+            )
+            or is_state('device_tracker.bcpro_203991_4_bermuda_tracker','home')
+          %}
+          {{ 'Yard Can' if ok else 'None' }}
+        cans_curb: >-
+          {% set ok =
+            (
+              states('sensor.bcpro_203991_4_nearest_rss') not in ['unknown','unavailable']
+              and (states('sensor.bcpro_203991_4_nearest_rss') | replace('dBm','') | trim | float(-100) > -75)
+            )
+            or
+            (
+              states('sensor.bcpro_203991_4_distance ') not in ['unknown','unavailable']
+              and (states('sensor.bcpro_203991_4_distance ') | float(9999) <= 60)
+            )
+            or is_state('device_tracker.bcpro_203991_4_bermuda_tracker','home')
+          %}
+          {{ 'None' if ok else 'Yard Can' }}
+           
+    # ==========================================================
+    # TOTAL TRASH CANS (all groups combined)
+    # Combines Waste (2), Recycle (1), and Yard (1) into a single count.
+    # ==========================================================
+    - name: "Total Trash Cans Home Count"
+      unique_id: total_trash_cans_home_count
+      unit_of_measurement: "cans"
+      icon: mdi:delete
+      state: >-
+        {{ states('sensor.waste_cans_home_count')|int(0)
+         + states('sensor.recycle_can_home_count')|int(0)
+         + states('sensor.yard_can_home_count')|int(0) }}
+      attributes:
+        total_home: >-
+          Waste: {{ states('sensor.waste_cans_home_count') }}/2,
+          Recycle: {{ states('sensor.recycle_can_home_count') }}/1,
+          Yard: {{ states('sensor.yard_can_home_count') }}/1
+
+- sensor:
+    # Current Washer User
+    - name: "Washer Current User"
+      unique_id: washer_current_user
+      icon: mdi:washing-machine
+      state: >-
+        {% if is_state('input_boolean.neil_washing_clothes', 'on') %}
+          Neil
+        {% elif is_state('input_boolean.chloe_washing_clothes', 'on') %}
+          Chloe
+        {% elif is_state('input_boolean.jaydon_washing_clothes', 'on') %}
+          Jaydon
+        {% else %}
+          Idle
+        {% endif %}
+
+    # Current Dryer User
+    - name: "Dryer Current User"
+      unique_id: dryer_current_user
+      icon: mdi:tumble-dryer
+      state: >-
+        {% if is_state('input_boolean.neil_drying_clothes', 'on') %}
+          Neil
+        {% elif is_state('input_boolean.chloe_drying_clothes', 'on') %}
+          Chloe
+        {% elif is_state('input_boolean.jaydon_drying_clothes', 'on') %}
+          Jaydon
+        {% else %}
+          Idle
+        {% endif %}
+
+    # Laundry Status (describes the full combination)
+    - name: "Laundry Status"
+      unique_id: laundry_status
+      icon: mdi:washing-machine-alert
+      state: >-
+        {% set washer = states('sensor.washer_current_user') %}
+        {% set dryer = states('sensor.dryer_current_user') %}
+        {% if washer == 'Idle' and dryer == 'Idle' %}
+          Both machines available
+        {% elif washer == 'Idle' %}
+          Dryer in use by {{ dryer }}
+        {% elif dryer == 'Idle' %}
+          Washer in use by {{ washer }}
+        {% elif washer == dryer %}
+          Both machines in use by {{ washer }}
+        {% else %}
+          Washer: {{ washer }}, Dryer: {{ dryer }}
+        {% endif %}
+      attributes:
+        washer: "{{ states('sensor.washer_current_user') }}"
+        dryer: "{{ states('sensor.dryer_current_user') }}"
+        combination_number: >-
+          {% set washer = states('sensor.washer_current_user') %}
+          {% set dryer = states('sensor.dryer_current_user') %}
+          {% set w = {'Idle': 0, 'Neil': 1, 'Chloe': 2, 'Jaydon': 3}[washer] %}
+          {% set d = {'Idle': 0, 'Neil': 1, 'Chloe': 2, 'Jaydon': 3}[dryer] %}
+          {{ (w * 4) + d + 1 }}
+
+# Add this to your configuration.yaml or templates.yaml
+
+# NEW EDIT
+
+- sensor:
+  - name: "Neil's Room Location"
+    unique_id: b4e1ef5b-8983-4276-ba7f-8bca19bd4210
+    state: >
+      {% set room = states('sensor.neil_s_iphone_room_location') %}
+      {% if room == 'office' %}
+        Neil's Office
+      {% elif room == 'bedroom' %}
+        Master Bedroom
+      {% elif room == 'kitchen' %}
+        Kitchen
+      {% elif room == 'living_room' %}
+        Living Room
+      {% elif room == 'family_room' %}
+        Family Room
+      {% elif room == 'garage' %}
+        Garage
+      {% elif room == 'bathroom' %}
+        Master Bathroom
+      {% elif room == 'guest_room' %}
+        Guest Room
+      {% elif room == 'jaydon_room' %}
+        Jaydon's Room
+      {% elif room == 'chloe_room' %}
+        Chloe's Room
+      {% elif room == 'not_home' %}
+        Away
+      {% elif room in ['unknown', 'unavailable', 'none'] %}
+        Unknown
+      {% else %}
+        {{ room | replace('_', ' ') | title }}
+      {% endif %}
+    icon: >
+      {% set room = states('sensor.neil_s_iphone_room_location') %}
+      {% if room == 'office' %}
+        mdi:desk
+      {% elif room in ['bedroom', 'master_bedroom'] %}
+        mdi:bed
+      {% elif room == 'kitchen' %}
+        mdi:silverware-fork-knife
+      {% elif room in ['living_room', 'family_room'] %}
+        mdi:sofa
+      {% elif room == 'garage' %}
+        mdi:garage
+      {% elif room == 'bathroom' %}
+        mdi:shower
+      {% elif room == 'not_home' %}
+        mdi:home-export-outline
+      {% else %}
+        mdi:home-map-marker
+      {% endif %}
+    attributes:
+      raw_location: "{{ states('sensor.neil_s_iphone_room_location') }}"
+      last_updated: "{{ states.sensor.neil_s_iphone_room_location.last_changed }}"
+
+# ====================================
+# FILE: templates.yaml
+# ====================================
+# Add this to your templates.yaml file:
+
+- binary_sensor:
+    - name: "Neil Home (Multi-Source)"
+      unique_id: neil_home_multi_source
+      device_class: presence
+      state: >
+        {% set gps_home = is_state('person.neil_greene', 'home') %}
+        {% set network_home = is_state('binary_sensor.neil_iphone_network', 'on') %}
+        {% set room = states('sensor.neils_iphone_bluetooth_location') %}
+        {% set bluetooth_home = room not in ['not_home', 'unknown', 'unavailable', 'none'] %}
+        {% set bed_occupied = is_state('binary_sensor.bed_presence_masterbedroom_occupied_left', 'on') %}
+        
+        {{ gps_home or network_home or bluetooth_home or bed_occupied }}
+      attributes:
+        gps_status: >
+          {{ 'home' if is_state('person.neil_greene', 'home') else 'away' }}
+        network_status: >
+          {{ 'connected' if is_state('binary_sensor.neil_iphone_network', 'on') else 'disconnected' }}
+        bluetooth_status: >
+          {% set room = states('sensor.neils_iphone_bluetooth_location') %}
+          {% if room in ['not_home', 'unknown', 'unavailable', 'none'] %}
+            not detected
+          {% else %}
+            detected ({{ room }})
+          {% endif %}
+        bed_status: >
+          {{ 'occupied' if is_state('binary_sensor.bed_presence_masterbedroom_occupied_left', 'on') else 'empty' }}
+        detection_method: >
+          {% set methods = [] %}
+          {% if is_state('person.neil_greene', 'home') %}
+            {% set methods = methods + ['GPS'] %}
+          {% endif %}
+          {% if is_state('binary_sensor.neil_iphone_network', 'on') %}
+            {% set methods = methods + ['Network'] %}
+          {% endif %}
+          {% set room = states('sensor.neils_iphone_bluetooth_location') %}
+          {% if room not in ['not_home', 'unknown', 'unavailable', 'none'] %}
+            {% set methods = methods + ['Bluetooth'] %}
+          {% endif %}
+          {% if is_state('binary_sensor.bed_presence_masterbedroom_occupied_left', 'on') %}
+            {% set methods = methods + ['Bed'] %}
+          {% endif %}
+          {{ methods | join(', ') if methods else 'None' }}
+
+# ============================
+# Jaydon & Chloe Multi-Source Sensors (Just the definitions)
+# ============================
+# Replace your existing jaydon and chloe sensor definitions with these
+
+    - name: "Jaydon Home (Multi-Source)"
+      unique_id: jaydon_home_multi_source
+      device_class: presence
+      state: >
+        {% set gps_home = is_state('person.jaydon_greene', 'home') %}
+        {% set network_home = is_state('binary_sensor.jaydon_iphone_network', 'on') %}
+        {% set room = states('sensor.jaydons_iphone_bluetooth_location') %}
+        {% set bluetooth_home = room not in ['not_home', 'unknown', 'unavailable', 'none'] %}
+        {% set bed_occupied = is_state('binary_sensor.bed_presence_jaydonsroom_occupied_either', 'on') %}
+        
+        {{ gps_home or network_home or bluetooth_home or bed_occupied }}
+      attributes:
+        gps_status: >
+          {{ 'home' if is_state('person.jaydon_greene', 'home') else 'away' }}
+        network_status: >
+          {{ 'connected' if is_state('binary_sensor.jaydon_iphone_network', 'on') else 'disconnected' }}
+        bluetooth_status: >
+          {% set room = states('sensor.jaydons_iphone_bluetooth_location') %}
+          {% if room in ['not_home', 'unknown', 'unavailable', 'none'] %}
+            not detected
+          {% else %}
+            detected ({{ room }})
+          {% endif %}
+        bed_status: >
+          {{ 'occupied' if is_state('binary_sensor.bed_presence_jaydonsroom_occupied_either', 'on') else 'empty' }}
+        detection_method: >
+          {% set methods = [] %}
+          {% if is_state('person.jaydon_greene', 'home') %}
+            {% set methods = methods + ['GPS'] %}
+          {% endif %}
+          {% if is_state('binary_sensor.jaydon_iphone_network', 'on') %}
+            {% set methods = methods + ['Network'] %}
+          {% endif %}
+          {% set room = states('sensor.jaydons_iphone_bluetooth_location') %}
+          {% if room not in ['not_home', 'unknown', 'unavailable', 'none'] %}
+            {% set methods = methods + ['Bluetooth'] %}
+          {% endif %}
+          {% if is_state('binary_sensor.bed_presence_jaydonsroom_occupied_either', 'on') %}
+            {% set methods = methods + ['Bed'] %}
+          {% endif %}
+          {{ methods | join(', ') if methods else 'None' }}
+
+    - name: "Chloe Home (Multi-Source)"
+      unique_id: chloe_home_multi_source
+      device_class: presence
+      state: >
+        {% set gps_home = is_state('person.chloe_greene', 'home') %}
+        {% set network_home = is_state('binary_sensor.chloe_iphone_network', 'on') %}
+        {% set room = states('sensor.chloes_iphone_bluetooth_location') %}
+        {% set bluetooth_home = room not in ['not_home', 'unknown', 'unavailable', 'none'] %}
+        {% set bed_occupied = is_state('binary_sensor.bed_presence_chloesroom_occupied_either', 'on') %}
+        
+        {{ gps_home or network_home or bluetooth_home or bed_occupied }}
+      attributes:
+        gps_status: >
+          {{ 'home' if is_state('person.chloe_greene', 'home') else 'away' }}
+        network_status: >
+          {{ 'connected' if is_state('binary_sensor.chloe_iphone_network', 'on') else 'disconnected' }}
+        bluetooth_status: >
+          {% set room = states('sensor.chloes_iphone_bluetooth_location') %}
+          {% if room in ['not_home', 'unknown', 'unavailable', 'none'] %}
+            not detected
+          {% else %}
+            detected ({{ room }})
+          {% endif %}
+        bed_status: >
+          {{ 'occupied' if is_state('binary_sensor.bed_presence_chloesroom_occupied_either', 'on') else 'empty' }}
+        detection_method: >
+          {% set methods = [] %}
+          {% if is_state('person.chloe_greene', 'home') %}
+            {% set methods = methods + ['GPS'] %}
+          {% endif %}
+          {% if is_state('binary_sensor.chloe_iphone_network', 'on') %}
+            {% set methods = methods + ['Network'] %}
+          {% endif %}
+          {% set room = states('sensor.chloes_iphone_bluetooth_location') %}
+          {% if room not in ['not_home', 'unknown', 'unavailable', 'none'] %}
+            {% set methods = methods + ['Bluetooth'] %}
+          {% endif %}
+          {% if is_state('binary_sensor.bed_presence_chloesroom_occupied_either', 'on') %}
+            {% set methods = methods + ['Bed'] %}
+          {% endif %}
+          {{ methods | join(', ') if methods else 'None' }}
+
+- binary_sensor:
+    - name: "Time of Day Morning"
+      unique_id: time_of_day_morning
+      state: >
+        {% set current_hour = now().hour + (now().minute / 60.0) %}
+        {% set sun_elevation = state_attr('sun.sun', 'elevation') %}
+        {{ sun_elevation > 0 and current_hour < 12 }}
+      icon: mdi:weather-sunset-up
+      attributes:
+        sun_elevation: "{{ state_attr('sun.sun', 'elevation') }}"
+        description: "Sun is up and before noon"
+
+    - name: "Time of Day Afternoon"
+      unique_id: time_of_day_afternoon
+      state: >
+        {% set current_hour = now().hour + (now().minute / 60.0) %}
+        {{ current_hour >= 12 and current_hour < 18 }}
+      icon: mdi:weather-sunny
+      attributes:
+        description: "Noon to 6 PM"
+
+    - name: "Time of Day Evening"
+      unique_id: time_of_day_evening
+      state: >
+        {% set current_hour = now().hour + (now().minute / 60.0) %}
+        {% set sun_elevation = state_attr('sun.sun', 'elevation') %}
+        {{ current_hour >= 18 and sun_elevation > 0 }}
+      icon: mdi:weather-sunset-down
+      attributes:
+        sun_elevation: "{{ state_attr('sun.sun', 'elevation') }}"
+        description: "After 6 PM and sun is still up"
+
+    - name: "Time of Day Nighttime"
+      unique_id: time_of_day_nighttime
+      state: >
+        {{ state_attr('sun.sun', 'elevation') < 0 }}
+      icon: >
+        {% if state_attr('sun.sun', 'elevation') < 0 %}
+          mdi:weather-night
+        {% else %}
+          mdi:weather-sunny
+        {% endif %}
+      attributes:
+        sun_elevation: "{{ state_attr('sun.sun', 'elevation') }}"
+        description: "Sun is below horizon"

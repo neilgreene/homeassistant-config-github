@@ -1,0 +1,59 @@
+# Storage directory with credentials and tokens
+.storage/
+
+# Secrets file
+secrets.yaml
+secrets.yml
+
+# Token files
+*.token
+*token*
+*.pickle
+
+# Database
+home-assistant_v2.db*
+*.db-shm
+*.db-wal
+
+# Log files
+*.log
+*.log.*
+
+# Temporary files
+*.pyc
+__pycache__/
+.DS_Store
+._*
+Thumbs.db
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+*.csr
+
+# Backup files
+*.backup
+*.bak
+
+# IDE files
+.vscode/
+.idea/
+
+# IP bans
+ip_bans.yaml
+
+# UUID
+.uuid
+
+# Google token cache
+.google.token
+
+# TTS cache
+tts/
+
+# Deps
+deps/
+
+# MS365 storage
+ms365_storage/

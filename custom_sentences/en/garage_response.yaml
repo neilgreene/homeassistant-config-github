@@ -1,0 +1,17 @@
+language: "en"
+intents:
+  GarageYes:
+    data:
+      - sentences:
+          - "yes"
+          - "yes please"
+          - "enable it"
+          - "turn it on"
+  
+  GarageNo:
+    data:
+      - sentences:
+          - "no"
+          - "no thanks"
+          - "keep it off"
+          - "keep it disabled"

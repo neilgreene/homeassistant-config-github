@@ -1,0 +1,598 @@
+- id: '1756191012262'
+  name: Ceiling Lights Off
+  entities:
+    light.ceiling_light_1:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      effect_list:
+      - 'off'
+      - candle
+      - fire
+      - prism
+      - sparkle
+      - opal
+      - glisten
+      - underwater
+      - cosmos
+      - sunbeam
+      - enchant
+      - sunrise
+      - sunset
+      supported_color_modes:
+      - color_temp
+      - xy
+      effect:
+      color_mode:
+      brightness: 65
+      color_temp_kelvin:
+      color_temp: 370
+      hs_color:
+      rgb_color:
+      xy_color:
+      mode: normal
+      dynamics: none
+      friendly_name: Ceiling Light 1
+      supported_features: 44
+      state: 'off'
+    light.ceiling_light_2:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      effect_list:
+      - 'off'
+      - candle
+      - fire
+      - prism
+      - sparkle
+      - opal
+      - glisten
+      - underwater
+      - cosmos
+      - sunbeam
+      - enchant
+      - sunrise
+      - sunset
+      supported_color_modes:
+      - color_temp
+      - xy
+      effect:
+      color_mode:
+      brightness: 65
+      color_temp_kelvin:
+      color_temp: 370
+      hs_color:
+      rgb_color:
+      xy_color:
+      mode: normal
+      dynamics: none
+      friendly_name: Ceiling Light 2
+      supported_features: 44
+      state: 'off'
+    light.ceiling_light_3:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      effect_list:
+      - 'off'
+      - candle
+      - fire
+      - prism
+      - sparkle
+      - opal
+      - glisten
+      - underwater
+      - cosmos
+      - sunbeam
+      - enchant
+      - sunrise
+      - sunset
+      supported_color_modes:
+      - color_temp
+      - xy
+      effect:
+      color_mode:
+      brightness: 65
+      color_temp_kelvin:
+      color_temp: 370
+      hs_color:
+      rgb_color:
+      xy_color:
+      mode: normal
+      dynamics: none
+      friendly_name: Ceiling Light 3
+      supported_features: 44
+      state: 'off'
+    light.ceiling_light_4:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      effect_list:
+      - 'off'
+      - candle
+      - fire
+      - prism
+      - sparkle
+      - opal
+      - glisten
+      - underwater
+      - cosmos
+      - sunbeam
+      - enchant
+      - sunrise
+      - sunset
+      supported_color_modes:
+      - color_temp
+      - xy
+      effect:
+      color_mode:
+      brightness: 65
+      color_temp_kelvin:
+      color_temp: 370
+      hs_color:
+      rgb_color:
+      xy_color:
+      mode: normal
+      dynamics: none
+      friendly_name: Ceiling Light 4
+      supported_features: 44
+      state: 'off'
+  metadata: {}
+- id: '1756846375380'
+  name: Bedtime
+  entities:
+    light.master_bathroom:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - xy
+      color_mode:
+      brightness: 65
+      color_temp_kelvin:
+      color_temp: 370
+      hs_color:
+      rgb_color:
+      xy_color:
+      is_hue_group: true
+      hue_scenes:
+      - Night
+      hue_type: room
+      lights:
+      - Master Bathroom Bloom
+      entity_id:
+      - light.master_bathroom_bloom
+      dynamics: false
+      icon: mdi:lightbulb-group
+      friendly_name: Master Bathroom
+      supported_features: 40
+      state: 'off'
+    light.kitchen:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - xy
+      color_mode:
+      brightness: 65
+      color_temp_kelvin:
+      color_temp: 370
+      hs_color:
+      rgb_color:
+      xy_color:
+      is_hue_group: true
+      hue_scenes:
+      - Arctic aurora
+      - Morning
+      - Bright
+      - Relax
+      - Read
+      - Savanna sunset
+      - Night Lighting
+      - Dimmed
+      - Concentrate
+      - Spring blossom
+      - Glowing grins
+      - Nightlight
+      - Under the tree
+      - Tropical twilight
+      - Energize
+      hue_type: room
+      lights:
+      - Kitchen Ceiling Lightstrip
+      entity_id:
+      - light.kitchen_ceiling_lightstrip
+      dynamics: false
+      icon: mdi:lightbulb-group
+      friendly_name: Kitchen
+      supported_features: 40
+      state: 'off'
+  metadata: {}
+- id: '1757116404515'
+  name: Office Away Lighting
+  entities: {}
+  metadata: {}
+- id: '1757441110949'
+  name: Kitchen - Night Scene
+  entities:
+    light.kitchen:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - xy
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 2732
+      color_temp: 366
+      hs_color:
+      - 28.327
+      - 64.71
+      rgb_color:
+      - 255
+      - 168
+      - 90
+      xy_color:
+      - 0.522
+      - 0.387
+      is_hue_group: true
+      hue_scenes:
+      - Relax
+      - Read
+      - Dimmed
+      - Spring blossom
+      - Energize
+      - Concentrate
+      - Under the tree
+      - Night Lighting
+      - Bright
+      - Savanna sunset
+      - Tropical twilight
+      - Morning
+      - Glowing grins
+      - Nightlight
+      - Arctic aurora
+      hue_type: room
+      lights:
+      - Kitchen Ceiling Lightstrip
+      entity_id:
+      - light.kitchen_ceiling_lightstrip
+      dynamics: false
+      icon: mdi:lightbulb-group
+      friendly_name: Kitchen
+      supported_features: 40
+      state: 'on'
+    cover.kitchen_shade:
+      current_position: 82
+      assumed_state: true
+      device_class: shade
+      friendly_name: Kitchen Patio Shade
+      supported_features: 15
+      state: open
+  metadata: {}
+- id: '1757876389305'
+  name: Day Scene
+  entities:
+    light.elgato_cw34j1a00647:
+      min_color_temp_kelvin: 2900
+      max_color_temp_kelvin: 7000
+      min_mireds: 142
+      max_mireds: 344
+      supported_color_modes:
+      - color_temp
+      friendly_name: Elgato Key Light
+      supported_features: 0
+      color_mode:
+      brightness: 65
+      color_temp_kelvin:
+      color_temp: 370
+      hs_color:
+      rgb_color:
+      xy_color:
+      state: 'off'
+    light.canvas_623e:
+      min_color_temp_kelvin: 1200
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 833
+      effect_list:
+      - Christmas Wheel
+      - Color Burst
+      - Color Burstt
+      - Falling Whites
+      - Fireworks
+      - Flame
+      - Flames
+      - Forest
+      - Inner Peace
+      - Meteor Shower
+      - Nemo
+      - Northern Lights
+      - Paint Splatter
+      - Pulse Pop Beats
+      - Radial Sound Bar
+      - Rhythmic Northern Lights
+      - Romantic
+      - Sound Bar
+      - Streaking Notes
+      - Twinkling Midnight Sky
+      supported_color_modes:
+      - color_temp
+      - hs
+      effect: Color Burst
+      color_mode: hs
+      brightness: 247
+      color_temp_kelvin:
+      color_temp: 370
+      hs_color:
+      - 0
+      - 0
+      rgb_color:
+      - 255
+      - 255
+      - 255
+      xy_color:
+      - 0.323
+      - 0.329
+      icon: mdi:spotlight
+      friendly_name: Wall Canvas
+      supported_features: 36
+      state: 'on'
+    light.desk_lamp_1:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      effect_list:
+      - 'off'
+      - candle
+      - fire
+      - prism
+      - sparkle
+      - opal
+      - glisten
+      - underwater
+      - cosmos
+      - sunbeam
+      - enchant
+      - sunrise
+      - sunset
+      supported_color_modes:
+      - color_temp
+      - xy
+      effect: 'off'
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 3731
+      color_temp: 268
+      hs_color:
+      - 26.973
+      - 39.973
+      rgb_color:
+      - 255
+      - 199
+      - 153
+      xy_color:
+      - 0.437
+      - 0.37
+      mode: normal
+      dynamics: none
+      friendly_name: 'Desk Lamp #1'
+      supported_features: 44
+      state: 'on'
+    light.desk_lamp_2:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - xy
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 3558
+      color_temp: 281
+      hs_color:
+      - 27.117
+      - 43.528
+      rgb_color:
+      - 255
+      - 194
+      - 144
+      xy_color:
+      - 0.449
+      - 0.373
+      mode: normal
+      dynamics: none
+      friendly_name: 'Desk Lamp #2'
+      supported_features: 40
+      state: 'on'
+    light.couch_lightstrip_1:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - xy
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 6535
+      color_temp: 153
+      hs_color:
+      - 54.768
+      - 1.6
+      rgb_color:
+      - 255
+      - 255
+      - 251
+      xy_color:
+      - 0.325
+      - 0.333
+      mode: normal
+      dynamics: none
+      friendly_name: 'Couch Lightstrip #1'
+      supported_features: 40
+      state: 'on'
+    light.couch_lightstrip_2:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - xy
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 6493
+      color_temp: 154
+      hs_color:
+      - 48.348
+      - 2.014
+      rgb_color:
+      - 255
+      - 254
+      - 250
+      xy_color:
+      - 0.326
+      - 0.333
+      mode: normal
+      dynamics: none
+      friendly_name: 'Couch Lightstrip #2'
+      supported_features: 40
+      state: 'on'
+    light.desk_ls_1:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - xy
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 2801
+      color_temp: 357
+      hs_color:
+      - 28.185
+      - 62.588
+      rgb_color:
+      - 255
+      - 170
+      - 95
+      xy_color:
+      - 0.516
+      - 0.386
+      mode: normal
+      dynamics: none
+      friendly_name: 'Desk LS #1'
+      supported_features: 40
+      state: 'on'
+    light.desk_ls_2:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - xy
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 3067
+      color_temp: 326
+      hs_color:
+      - 27.718
+      - 55.105
+      rgb_color:
+      - 255
+      - 179
+      - 114
+      xy_color:
+      - 0.49
+      - 0.382
+      mode: normal
+      dynamics: none
+      friendly_name: 'Desk LS #2'
+      supported_features: 40
+      state: 'on'
+    light.desk_lightstrip_3:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - xy
+      color_mode: color_temp
+      brightness: 128
+      color_temp_kelvin: 2188
+      color_temp: 457
+      hs_color:
+      - 29.84
+      - 85.19
+      rgb_color:
+      - 255
+      - 146
+      - 38
+      xy_color:
+      - 0.579
+      - 0.388
+      mode: normal
+      dynamics: none
+      friendly_name: 'Desk Lightstrip #3'
+      supported_features: 40
+      state: 'on'
+    light.office_shelf_ls:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6535
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - xy
+      color_mode: color_temp
+      brightness: 214
+      color_temp_kelvin: 2754
+      color_temp: 363
+      hs_color:
+      - 28.281
+      - 64.025
+      rgb_color:
+      - 255
+      - 169
+      - 92
+      xy_color:
+      - 0.519
+      - 0.387
+      mode: normal
+      dynamics: none
+      friendly_name: Office Shelf LS
+      supported_features: 40
+      state: 'on'
+  metadata:
+    light.desk_lamp_1:
+      entity_only: true
+    light.desk_lamp_2:
+      entity_only: true
+    light.couch_lightstrip_1:
+      entity_only: true
+    light.couch_lightstrip_2:
+      entity_only: true
+    light.desk_ls_1:
+      entity_only: true
+    light.desk_ls_2:
+      entity_only: true
+    light.desk_lightstrip_3:
+      entity_only: true
+    light.office_shelf_ls:
+      entity_only: true

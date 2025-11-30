@@ -1,0 +1,3 @@
+- platform: file
+  name: automation_error_log
+  filename: /config/logs/automation_failures.log

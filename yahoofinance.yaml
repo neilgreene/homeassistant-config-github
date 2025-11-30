@@ -1,0 +1,16 @@
+# ==========================================================
+# yahoofinance.yaml
+# Yahoo Finance stock tickers (separate include per your config)
+# ==========================================================
+
+include_pre_values: true
+scan_interval:
+  minutes: 5
+symbols:
+  - AAPL      # Apple
+  - MSFT      # Microsoft
+  - OPEN      # Opendoor
+  - NVDA      # Nvidia
+  - META      # Meta
+  - GOOG      # Google
+  - PLTR      # Palantir

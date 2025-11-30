@@ -1,0 +1,4 @@
+location_notifications_enabled:
+  name: Location Notifications Enabled
+  icon: mdi:map-marker-check
+  initial: on

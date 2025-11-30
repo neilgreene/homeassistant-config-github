@@ -1,0 +1,132 @@
+# ==========================================================
+# configuration.yaml
+#
+# Core Home Assistant configuration.
+# This file stays small & clean: all domains and integrations
+# are split into separate include files for organization.
+# ==========================================================
+
+# ----------------------------------------------------------
+# CORE INTEGRATIONS
+# Loads the default set of integrations (discovery, history,
+# logbook, mobile app, person, etc.). Do not remove.
+# ----------------------------------------------------------
+default_config:
+
+# ----------------------------------------------------------
+# PACKAGES
+# Enables "packages" so a single YAML file can contain
+# multiple domains (sensors, automations, scripts, etc.).
+# Useful for feature-specific bundles under /packages/.
+# ----------------------------------------------------------
+homeassistant:
+  allowlist_external_dirs:
+    - "/config/logs"
+  packages: !include_dir_named packages
+
+
+# ----------------------------------------------------------
+# FRONTEND & THEMES
+# Loads all YAML theme files from the /themes folder.
+# Themes can then be applied via profile settings.
+# ----------------------------------------------------------
+frontend:
+  themes: !include_dir_merge_named themes
+
+# ----------------------------------------------------------
+# DOMAIN SPLITS
+# Each domain is split into its own file for clarity.
+# If a file doesn’t exist yet, you can create it later.
+# ----------------------------------------------------------
+automation:           !include automations.yaml      # Automations (triggers, conditions, actions)
+calendar:             !include calendars.yaml        # Calendar integrations (CalDAV / iCloud)
+geo_location:         !include geolocations.yaml     # Geo feeds (e.g., USGS earthquakes)
+group:                !include groups.yaml           # Groups for UI and logic
+input_boolean:        !include input_booleans.yaml   # All Booleans
+input_select:         !include input_selects.yaml    # input_selects
+input_text:           !include input_text.yaml       # input_text
+intent_script:        !include intent_script.yaml    # Voice intent scripts and responses
+light:                !include lights.yaml           # Lights
+# notify:             !include notify.yaml           # Notify system
+scene:                !include scenes.yaml           # Scenes
+script:               !include scripts.yaml          # Scripts
+sensor:               !include sensors.yaml          # Platform-based sensors (REST, MQTT, etc.)
+switch:               !include switches.yaml         # Switches (platform-based)
+
+# ----------------------------------------------------------
+# TEMPLATES
+# Template-based sensors and binary_sensors live here.
+# These include occupancy counts, trashcans, uptime, etc.
+# Uses the new template format (split by domain).
+# ----------------------------------------------------------
+template:             !include templates.yaml
+
+# ----------------------------------------------------------
+# YAHOO FINANCE INTEGRATION
+# Tracks stock prices using the yahoofinance integration.
+# Kept in its own file (yahoofinance.yaml) for readability.
+# ----------------------------------------------------------
+yahoofinance:         !include yahoofinance.yaml
+
+# ==========================================================
+# NOTES
+# - Put sensitive credentials (passwords, tokens) in secrets.yaml
+#   and reference them with !secret inside your include files.
+# - After editing YAML, use Developer Tools → YAML to reload
+#   sections (e.g., "Reload Template Entities") or restart HA.
+# - If a referenced include file is missing, HA will fail validation.
+# ==========================================================
+
+shell_command:
+  # Writes automation error messages to a persistent log file.
+  # Home Assistant's notify.file integration is currently broken
+  # (see bug: https://github.com/home-assistant/core/issues/132555)
+  # This command safely appends errors to a custom log file.
+  log_automation_error: "bash -c 'echo {{ message | tojson }} >> /config/logs/automation_failures.log'"
+  get_recent_failures: "sh -c 'tail -n 10 /config/logs/automation_failures.log > /config/.automation_failures_recent.txt'"
+  update_failures: "/config/scripts/update_failures.sh"
+
+# ----------------------------------------------------------
+# SYSTEM LOG SETTINGS
+# Enables detailed system logging and forwards log entries
+# as events to the Home Assistant event bus.
+#
+# Purpose:
+#   Required for automations that monitor or react to errors
+#   using "system_log_event" (e.g., the automation failure log).
+#
+# Options:
+#   fire_event: true
+#       Broadcasts each log entry (ERROR, WARNING, INFO, etc.)
+#       as a "system_log_event" visible in Developer Tools → Events.
+#
+#   max_entries: 200
+#       Limits how many entries are stored in the in-memory system log.
+#       Older entries are pruned automatically to conserve memory.
+#
+# Reference:
+#   https://www.home-assistant.io/integrations/system_log/
+#
+# Note:
+#   - This must be enabled for "[MONITOR]: Log all ERROR/CRITICAL events to file"
+#     to receive trigger events.
+#   - Once verified working, we can refine filters to log only automation failures.
+# ----------------------------------------------------------
+system_log:
+  fire_event: true
+  max_entries: 200
+
+# ==================================================
+# LAYER 1: Multi-Source Presence Detection for Neil
+# ==================================================
+
+# ====================================
+# FILE: configuration.yaml
+# ====================================
+# The PING integration MUST go in configuration.yaml
+# (It cannot go in sensors.yaml - it's a separate integration)
+
+# ==================================================
+# LAYER 1: Multi-Source Presence Detection
+# ==================================================
+

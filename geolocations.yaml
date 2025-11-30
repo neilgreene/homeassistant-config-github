@@ -1,0 +1,12 @@
+# ==========================================================
+# geolocations.yaml
+# Geo-location feeds (USGS Earthquakes, etc.)
+# Ensure the filename matches configuration.yaml include
+# ==========================================================
+
+- platform: usgs_earthquakes_feed
+  feed_type: "past_month_all_earthquakes"  # options: past_hour, past_day, ...
+  radius: 100                               # miles/km (as per integration docs)
+  minimum_magnitude: 3.0
+  latitude: 33.675117636980346
+  longitude: -117.66206145286561
