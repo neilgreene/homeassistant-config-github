@@ -2169,16 +2169,17 @@
     for:
       hours: 0
       minutes: 0
-      seconds: 20
+      seconds: 10
   - trigger: state
     entity_id:
     - binary_sensor.neil_home_stable
-    to: 'off'
+    to:
+    - 'off'
     id: Neil leaving home
     for:
       hours: 0
-      minutes: 0
-      seconds: 5
+      minutes: 5
+      seconds: 0
   conditions:
   - condition: state
     entity_id: input_boolean.automations_enabled
@@ -2294,7 +2295,7 @@
     for:
       hours: 0
       minutes: 0
-      seconds: 30
+      seconds: 10
     from: 'off'
   - trigger: state
     entity_id:
@@ -2304,7 +2305,7 @@
     id: home_leave
     for:
       hours: 0
-      minutes: 15
+      minutes: 5
       seconds: 0
     from:
     - 'on'
@@ -2526,7 +2527,7 @@
     for:
       hours: 0
       minutes: 0
-      seconds: 30
+      seconds: 10
   - trigger: state
     entity_id:
     - binary_sensor.chloe_home_stable
@@ -2535,7 +2536,7 @@
     id: home_leave
     for:
       hours: 0
-      minutes: 15
+      minutes: 5
       seconds: 0
   - trigger: zone
     entity_id: person.chloe_greene

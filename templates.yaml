@@ -121,7 +121,7 @@
       {% elif multi == 'off' %}
         {# If multi-source says AWAY, wait 3 minutes before confirming #}
         {% if is_state('binary_sensor.neil_home_stable', 'on') %}
-          {{ time_since_change >= 180 }}
+          {{ time_since_change < 180 }}
         {% else %}
           false
         {% endif %}
@@ -159,7 +159,7 @@
       {% elif multi == 'off' %}
         {# If multi-source says AWAY, wait 3 minutes before confirming #}
         {% if is_state('binary_sensor.jaydon_home_stable', 'on') %}
-          {{ time_since_change >= 180 }}
+          {{ time_since_change < 180 }}
         {% else %}
           false
         {% endif %}
@@ -192,7 +192,7 @@
       {% elif multi == 'off' %}
         {# If multi-source says AWAY, wait 3 minutes before confirming #}
         {% if is_state('binary_sensor.chloe_home_stable', 'on') %}
-          {{ time_since_change >= 180 }}
+          {{ time_since_change < 180 }}
         {% else %}
           false
         {% endif %}
