@@ -2415,7 +2415,7 @@
       - action: notify.mobile_app_neils_iphone
         metadata: {}
         data:
-          message: Jaydon is arrived at home.
+          message: Jaydon is left home.
       - action: notify.send_message
         data:
           message: Jaydon has left home.
@@ -2514,7 +2514,7 @@
           message: Jaydon has left 24 Hour Fitness.
       - action: notify.send_message
         data:
-          message: Jaydo
+          message: Jaydon has left 24 Hour Fitness.
 - id: chloe_location_tracking
   alias: '[TRACKING]: Chloe Location Tracking'
   description: ''
