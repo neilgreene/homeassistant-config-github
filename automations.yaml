@@ -2305,7 +2305,7 @@
     id: home_leave
     for:
       hours: 0
-      minutes: 5
+      minutes: 10
       seconds: 0
     from:
     - 'on'
@@ -2536,7 +2536,7 @@
     id: home_leave
     for:
       hours: 0
-      minutes: 5
+      minutes: 10
       seconds: 0
   - trigger: zone
     entity_id: person.chloe_greene
