@@ -9,7 +9,7 @@
                 }
             },
             "geocode": {
-                "title": "Person Location Geocode Configuration",
+                "title": "Person Location Geocode Configuration (1 of 2)",
                 "description": "Reverse geocoding and mapping can be done using one (or more) external services.  If you need help with the configuration or obtaining keys, have a look at More Details [**here**](https://github.com/rodpayne/home-assistant_person_location/blob/master/README.md#configuration-parameters).",
                 "data": {
                     "language": "Google Language",
@@ -21,11 +21,28 @@
                     "radar_api_key": "Radar API Key (publishable)"
                 }
             },
+            "source": {
+                "title": "Person Location Geocode Configuration (2 of 2)",
+                "description": "Driving distance and duration can be obtained using one of the following external services. If you need help with the configuration or obtaining keys, have a look at More Details [**here**](https://github.com/rodpayne/home-assistant_person_location/blob/master/README.md#configuration-parameters).",
+                "data": {
+                    "distance_duration_source": "Source for driving distance and duration"
+                }
+            },
             "sensors": {
                 "title": "Person Location Sensor Configuration",
                 "description": "We can create individual sensors so that template sensors do not need to be manually configured. Choose from this list: altitude, bread_crumbs, direction, driving_miles, driving_minutes, geocoded, latitude, longitude, meters_from_home, miles_from_home.  If you need help with the configuration, have a look [**here**](https://github.com/rodpayne/home-assistant_person_location/blob/master/README.md#configuration-parameters).",
                 "data": {
                     "create_sensors": "Sensors to be created (comma separated)",
+                    "altitude": "altitude",
+                    "bread_crumbs": "bread_crumbs",
+                    "direction": "direction",
+                    "driving_miles": "driving_miles",
+                    "driving_minutes": "driving_minutes",
+                    "geocoded": "geocoded",
+                    "latitude": "latitude",
+                    "longitude": "longitude",
+                    "meters_from_home": "meters_from_home",
+                    "miles_from_home": "miles_from_home",
                     "platform": "Platform for output sensor (experimental)"
                 }
             },
@@ -98,7 +115,7 @@
         },
         "abort": {
             "already_configured": "Already configured and only a single instance is allowed.",
-            "normal exit": "The previous entry has been updated rather than creating a new one."
+            "reconfigure_successful": "The pre-existing entry has been updated."
         }
     },
     "options": {

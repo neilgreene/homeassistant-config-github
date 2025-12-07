@@ -1,6 +1,6 @@
 """Provide info to system health."""
 
-# https://developers.home-assistant.io/blog/2020/11/09/system-health-and-templates
+# See https://developers.home-assistant.io/blog/2020/11/09/system-health-and-templates
 
 from homeassistant.components import system_health
 from homeassistant.core import HomeAssistant, callback
@@ -13,6 +13,9 @@ from .const import (
     DATA_ENTITY_INFO,
     DATA_STATE,
     DOMAIN,
+    INFO_GEOCODE_COUNT,
+    INFO_LOCALITY,
+    INFO_TRIGGER_COUNT,
     VERSION,
 )
 
@@ -84,15 +87,15 @@ async def system_health_info(hass):
 
         for sensor in entity_info:
             if (
-                "trigger_count" in entity_info[sensor]
-                and entity_info[sensor]["trigger_count"] != 0
+                INFO_TRIGGER_COUNT in entity_info[sensor]
+                and entity_info[sensor][INFO_TRIGGER_COUNT] != 0
             ):
                 return_info[sensor] = (
-                    str(entity_info[sensor]["geocode_count"])
+                    str(entity_info[sensor][INFO_GEOCODE_COUNT])
                     + " geolocated for "
-                    + str(entity_info[sensor]["trigger_count"])
+                    + str(entity_info[sensor][INFO_TRIGGER_COUNT])
                     + " triggers, last = "
-                    + entity_info[sensor]["locality"]
+                    + entity_info[sensor][INFO_LOCALITY]
                 )
 
     return return_info

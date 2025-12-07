@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import math
-import time
+#import time
 import traceback
 from datetime import datetime
 
@@ -27,6 +27,10 @@ from homeassistant.util.location import distance
 from jinja2 import Template
 from pywaze.route_calculator import WazeRouteCalculator
 
+from .sensor import (
+    create_and_register_template_sensor,
+)
+
 from .const import (
     ATTR_BREAD_CRUMBS,
     ATTR_COMPASS_BEARING,
@@ -35,8 +39,15 @@ from .const import (
     ATTR_GEOCODED,
     ATTR_METERS_FROM_HOME,
     ATTR_MILES_FROM_HOME,
+    ATTR_REPORTED_STATE,
+    ATTR_SOURCE,
     ATTR_SPEED,
+    ATTR_GOOGLE_MAPS,
+    ATTR_MAPQUEST,
+    ATTR_OPEN_STREET_MAP,
+    ATTR_RADAR,
     CONF_CREATE_SENSORS,
+    CONF_DISTANCE_DURATION_SOURCE,
     CONF_FRIENDLY_NAME_TEMPLATE,
     CONF_GOOGLE_API_KEY,
     CONF_LANGUAGE,
@@ -45,25 +56,34 @@ from .const import (
     CONF_RADAR_API_KEY,
     CONF_REGION,
     DEFAULT_API_KEY_NOT_SET,
+    DEFAULT_FRIENDLY_NAME_TEMPLATE,
     DOMAIN,
     FAR_AWAY_METERS,
     get_waze_region,
     IC3_STATIONARY_ZONE_PREFIX,
-    INTEGRATION_LOCK,
+    INFO_GEOCODE_COUNT,
+    INFO_LOCALITY,
+    INFO_LOCATION_LATITUDE,
+    INFO_LOCATION_LONGITUDE,
+    INTEGRATION_ASYNCIO_LOCK,
     INTEGRATION_NAME,
     DEFAULT_LOCALITY_PRIORITY_OSM,
     METERS_PER_KM,
     METERS_PER_MILE,
     MIN_DISTANCE_TRAVELLED_TO_GEOCODE,
-    PERSON_LOCATION_ENTITY,
-    TARGET_LOCK,
+#    PERSON_LOCATION_TARGET,
+    TARGET_ASYNCIO_LOCK,
     THROTTLE_INTERVAL,
     WAZE_MIN_METERS_FROM_HOME,
     ZONE_DOMAIN,
 )
 
+from .helpers.duration_distance import update_driving_miles_and_minutes
+
 _LOGGER = logging.getLogger(__name__)
 
+def get_target_entity(pli, entity_id):
+    return pli.hass.data.get(DOMAIN, {}).get("entities", {}).get(entity_id)
 
 def is_json(myjson):
     try:
@@ -95,7 +115,7 @@ def setup_reverse_geocode(pli):
 
         From https://gist.github.com/jeromer/2005586.
         """
-        if (type(pointA) != tuple) or (type(pointB) != tuple):
+        if (type(pointA) is not tuple) or (type(pointB) is not tuple):
             raise TypeError("Only tuples are supported as arguments")
 
         lat1 = math.radians(pointA[0])
@@ -111,134 +131,13 @@ def setup_reverse_geocode(pli):
         initial_bearing = math.atan2(x, y)
 
         # Now we have the initial bearing but math.atan2 return values
-        # from -180° to + 180° which is not what we want for a compass bearing.
+        #   from -180° to + 180° which is not what we want for a compass bearing.
         initial_bearing = math.degrees(initial_bearing)
         compass_bearing = (initial_bearing + 360) % 360
 
         return compass_bearing
 
-    def _get_waze_driving_miles_and_minutes(
-        target,
-        new_latitude,
-        new_longitude,
-        waze_country_code,
-    ):
-        """ 
-        Updates target.attributes:
-            ATTR_DRIVING_MILES
-            ATTR_DRIVING_MINUTES
-            ATTR_ATTRIBUTION
-
-        May update pli.attributes:
-            "waze_error_count"
-        """
-
-        entity_id = target.entity_id
-        if not pli.configuration["use_waze"]:
-            return
-
-        # If we’re already “home,” skip routing
-        if target.attributes[ATTR_METERS_FROM_HOME] < WAZE_MIN_METERS_FROM_HOME:
-            target.attributes[ATTR_DRIVING_MILES] = target.attributes[ATTR_MILES_FROM_HOME]
-            target.attributes[ATTR_DRIVING_MINUTES] = "0"
-            return
-
-        from_location = f"{new_latitude},{new_longitude}"
-        to_location = (
-            f"{pli.attributes['home_latitude']},"
-            f"{pli.attributes['home_longitude']}"
-        )
-        waze_region = get_waze_region(waze_country_code)
-
-        _LOGGER.debug("from_location: " + from_location)
-        _LOGGER.debug("to_location: " + to_location)
-        _LOGGER.debug("waze_region: " + waze_region)
-
-        # First attempt: HA-managed service
-        try:
-            if not pli.hass.services.has_service("waze_travel_time", "get_travel_times"):
-                raise ServiceNotFound("waze_travel_time", "get_travel_times")
-
-            service_coro = pli.hass.services.async_call(
-                "waze_travel_time",
-                "get_travel_times",
-                {
-                    "origin": from_location,
-                    "destination": to_location,
-                    "region": waze_region,
-                },
-                blocking=True,
-                return_response=True,
-            )
-            future = asyncio.run_coroutine_threadsafe(service_coro, pli.hass.loop)
-            data = future.result()
-            routes = data.get("routes", [])
-            if not routes:
-                raise ValueError("No routes from HA service")
-
-            # pick first or apply your street‐name filter here
-            best = routes[0]
-            duration = best["duration"]
-            distance_km = best["distance"]
-
-        except Exception as service_err:
-            _LOGGER.debug(
-                "(%s) Waze service failed (%s), falling back to pywaze",
-                entity_id,
-                type(service_err).__name__,
-            )
-            # Fallback: direct pywaze call
-            try:
-                # pywaze expects an aiohttp client session
-                client = WazeRouteCalculator(
-                    region=waze_region.upper(),
-                    client=get_async_client(pli.hass),
-                )
-                coro = client.calc_routes(
-                    from_location,
-                    to_location,
-                    avoid_toll_roads=True,
-                    avoid_subscription_roads=True,
-                    avoid_ferries=True,
-                )
-                future = asyncio.run_coroutine_threadsafe(coro, pli.hass.loop)
-                pywaze_routes = future.result()
-                if not pywaze_routes:
-                    raise ValueError("No routes from pywaze")
-
-                route = pywaze_routes[0]
-                duration = route.duration
-                distance_km = route.distance
-
-            except Exception as pw_err:
-                _LOGGER.error(
-                    "(%s) pywaze fallback failed %s: %s",
-                    entity_id,
-                    type(pw_err).__name__,
-                    pw_err,
-                )
-                pli.attributes["waze_error_count"] = (
-                    pli.attributes.get("waze_error_count", 0) + 1
-                )
-                target.attributes[ATTR_DRIVING_MILES] = target.attributes[ATTR_MILES_FROM_HOME]
-                return
-
-        # Common post‐processing
-        miles = distance_km * METERS_PER_KM / METERS_PER_MILE
-        if miles <= 0:
-            display_miles = target.attributes[ATTR_MILES_FROM_HOME]
-        elif miles >= 100:
-            display_miles = round(miles, 0)
-        elif miles >= 10:
-            display_miles = round(miles, 1)
-        else:
-            display_miles = round(miles, 2)
-
-        target.attributes[ATTR_DRIVING_MILES] = str(display_miles)
-        target.attributes[ATTR_DRIVING_MINUTES] = str(round(duration, 1))
-        target.attributes[ATTR_ATTRIBUTION] += '"Data by Waze App. https://waze.com"; '
-
-    def handle_reverse_geocode(call):
+    async def handle_reverse_geocode(call):
         """
         Handle the reverse_geocode service.
 
@@ -253,7 +152,7 @@ def setup_reverse_geocode(pli):
                 - location_time (optional)
         Output:
             - determine <locality> for friendly_name
-            - record full location from Google_Maps, MapQuest, and/or Open_Street_Map
+            - full location from Radar, Google_Maps, MapQuest, and/or Open_Street_Map
             - calculate other location-based statistics, such as distance_from_home
             - add to bread_crumbs as locality changes
             - create/update additional sensors if requested
@@ -284,9 +183,9 @@ def setup_reverse_geocode(pli):
             )
         )
 
-        with INTEGRATION_LOCK:
+        async with INTEGRATION_ASYNCIO_LOCK:
             """Lock while updating the pli(API_STATE_OBJECT)."""
-            _LOGGER.debug("INTEGRATION_LOCK obtained")
+            _LOGGER.debug("INTEGRATION_ASYNCIO_LOCK obtained")
 
             try:
                 currentApiTime = datetime.now()
@@ -315,7 +214,7 @@ def setup_reverse_geocode(pli):
                                 pli.attributes["api_calls_throttled"],
                             )
                         )
-                        time.sleep(wait_time)
+                        await asyncio.sleep(wait_time)
                         currentApiTime = datetime.now()
 
                     # Record the integration attributes in the API_STATE_OBJECT:
@@ -341,30 +240,34 @@ def setup_reverse_geocode(pli):
 
                     # Handle the service call, updating the target(entity_id):
 
-                    with TARGET_LOCK:
+                    async with TARGET_ASYNCIO_LOCK:
                         """Lock while updating the target(entity_id)."""
-                        _LOGGER.debug("TARGET_LOCK obtained")
+                        _LOGGER.debug("TARGET_ASYNCIO_LOCK obtained")
 
-                        target = PERSON_LOCATION_ENTITY(entity_id, pli)
-                        target.entity_id = entity_id
-                        target.attributes[ATTR_ATTRIBUTION] = ""
+                        target = get_target_entity(pli, entity_id)
+                        if not target:
+                            _LOGGER.warning("No target sensor found for %s", entity_id)
+                            return False
 
-                        if ATTR_LATITUDE in target.attributes:
-                            new_latitude = target.attributes[ATTR_LATITUDE]
+                        # Reset attribution before updating
+                        target._attr_extra_state_attributes[ATTR_ATTRIBUTION] = ""
+
+                        if ATTR_LATITUDE in target._attr_extra_state_attributes:
+                            new_latitude = target._attr_extra_state_attributes[ATTR_LATITUDE]
                         else:
                             new_latitude = "None"
-                        if ATTR_LONGITUDE in target.attributes:
-                            new_longitude = target.attributes[ATTR_LONGITUDE]
+                        if ATTR_LONGITUDE in target._attr_extra_state_attributes:
+                            new_longitude = target._attr_extra_state_attributes[ATTR_LONGITUDE]
                         else:
                             new_longitude = "None"
 
-                        if "location_latitude" in target.this_entity_info:
-                            old_latitude = target.this_entity_info["location_latitude"]
+                        if INFO_LOCATION_LATITUDE in target.this_entity_info:
+                            old_latitude = target.this_entity_info[INFO_LOCATION_LATITUDE]
                         else:
                             old_latitude = "None"
-                        if "location_longitude" in target.this_entity_info:
+                        if INFO_LOCATION_LONGITUDE in target.this_entity_info:
                             old_longitude = target.this_entity_info[
-                                "location_longitude"
+                                INFO_LOCATION_LONGITUDE
                             ]
                         else:
                             old_longitude = "None"
@@ -422,7 +325,7 @@ def setup_reverse_geocode(pli):
                             old_distance_from_home = 0
                             compass_bearing = 0
 
-                        target.attributes[ATTR_COMPASS_BEARING] = compass_bearing
+                        target._attr_extra_state_attributes[ATTR_COMPASS_BEARING] = compass_bearing
 
                         if new_latitude == "None" or new_longitude == "None":
                             _LOGGER.debug(
@@ -445,9 +348,9 @@ def setup_reverse_geocode(pli):
                         else:
                             locality = "?"
 
-                            if "location_time" in target.attributes:
+                            if "location_time" in target._attr_extra_state_attributes:
                                 new_location_time = datetime.strptime(
-                                    str(target.attributes["location_time"]),
+                                    str(target._attr_extra_state_attributes["location_time"]),
                                     "%Y-%m-%d %H:%M:%S.%f",
                                 )
                                 _LOGGER.debug(
@@ -498,13 +401,13 @@ def setup_reverse_geocode(pli):
                                 )
                             else:
                                 speed_during_interval = 0
-                            target.attributes[ATTR_SPEED] = round(
+                            target._attr_extra_state_attributes[ATTR_SPEED] = round(
                                 speed_during_interval, 1
                             )
 
                             if (
-                                "reported_state" in target.attributes
-                                and target.attributes["reported_state"].lower()
+                                ATTR_REPORTED_STATE in target._attr_extra_state_attributes
+                                and target._attr_extra_state_attributes[ATTR_REPORTED_STATE].lower()
                                 == "home"
                             ):
                                 distance_from_home = 0  # clamp it down since "Home" is not a single point
@@ -533,10 +436,10 @@ def setup_reverse_geocode(pli):
                                 + ") meters_from_home = "
                                 + str(distance_from_home)
                             )
-                            target.attributes[ATTR_METERS_FROM_HOME] = round(
+                            target._attr_extra_state_attributes[ATTR_METERS_FROM_HOME] = round(
                                 distance_from_home, 1
                             )
-                            target.attributes[ATTR_MILES_FROM_HOME] = round(
+                            target._attr_extra_state_attributes[ATTR_MILES_FROM_HOME] = round(
                                 distance_from_home / METERS_PER_MILE, 1
                             )
 
@@ -553,10 +456,12 @@ def setup_reverse_geocode(pli):
                             _LOGGER.debug(
                                 "(" + entity_id + ") direction = " + direction
                             )
-                            target.attributes["direction"] = direction
+                            target._attr_extra_state_attributes["direction"] = direction
 
-                            # default the waze country code from Google region config
+                            # Default the waze country code from Google region config
                             waze_country_code = pli.configuration["region"].upper()
+
+                        #------- Radar -------------------------------------------------
 
                             if (
                                 pli.configuration[CONF_RADAR_API_KEY]
@@ -576,9 +481,9 @@ def setup_reverse_geocode(pli):
                                 }
 
                                 radar_decoded = {}
-                                radar_response = httpx.get(radar_url, headers=headers)
-                                radar_json_input = radar_response.text
-                                radar_decoded = json.loads(radar_json_input)
+                                async_client = get_async_client(pli.hass)
+                                radar_response = await async_client.get(radar_url, headers=headers)
+                                radar_decoded = radar_response.json()
 
                                 if "city" in radar_decoded["addresses"][0]:
                                     locality = radar_decoded["addresses"][0]["city"]
@@ -617,10 +522,10 @@ def setup_reverse_geocode(pli):
                                     + formatted_address
                                 )
 
-                                target.attributes["Radar"] = formatted_address
+                                target._attr_extra_state_attributes[ATTR_RADAR] = formatted_address
 
                                 radar_attribution = '"Powered by Radar"'
-                                target.attributes[ATTR_ATTRIBUTION] += (
+                                target._attr_extra_state_attributes[ATTR_ATTRIBUTION] += (
                                     radar_attribution + "; "
                                 )
 
@@ -628,24 +533,21 @@ def setup_reverse_geocode(pli):
                                     ATTR_GEOCODED
                                     in pli.configuration[CONF_CREATE_SENSORS]
                                 ):
-                                    target.make_template_sensor(
-                                        "Radar",
-                                        [
-                                            {ATTR_COMPASS_BEARING: compass_bearing},
-                                            ATTR_LATITUDE,
-                                            ATTR_LONGITUDE,
-                                            ATTR_SOURCE_TYPE,
-                                            ATTR_GPS_ACCURACY,
-                                            "icon",
-                                            {"locality": locality},
-                                            {
-                                                "location_time": new_location_time.strftime(
-                                                    "%Y-%m-%d %H:%M:%S"
-                                                )
-                                            },
-                                            {ATTR_ATTRIBUTION: radar_attribution},
-                                        ],
-                                    )
+                                    # Create the template sensor entity
+                                    attrs = {
+                                        ATTR_COMPASS_BEARING: compass_bearing,
+                                        ATTR_LATITUDE: new_latitude,
+                                        ATTR_LONGITUDE: new_longitude,
+                                        ATTR_SOURCE_TYPE: target._attr_extra_state_attributes.get(ATTR_SOURCE_TYPE),
+                                        ATTR_GPS_ACCURACY: target._attr_extra_state_attributes.get(ATTR_GPS_ACCURACY),
+                                        "icon": target._attr_extra_state_attributes.get("icon"),
+                                        "locality": locality,
+                                        "location_time": new_location_time.strftime("%Y-%m-%d %H:%M:%S"),
+                                        ATTR_ATTRIBUTION: radar_attribution,
+                                    }
+                                    create_and_register_template_sensor(pli.hass, target, ATTR_RADAR, formatted_address, attrs)
+
+                        #------- Open Street Map ---------------------------------------
 
                             if (
                                 pli.configuration[CONF_OSM_API_KEY]
@@ -674,9 +576,10 @@ def setup_reverse_geocode(pli):
                                     )
 
                                 osm_decoded = {}
-                                osm_response = httpx.get(osm_url)
-                                osm_json_input = osm_response.text
-                                osm_decoded = json.loads(osm_json_input)
+                                async_client = get_async_client(pli.hass)  # HA-managed httpx.AsyncClient
+                                osm_response = await async_client.get(osm_url)  # await instead of blocking
+
+                                osm_decoded = osm_response.json()
 
                                 for key in DEFAULT_LOCALITY_PRIORITY_OSM:
                                     if key in osm_decoded["address"]:
@@ -703,13 +606,13 @@ def setup_reverse_geocode(pli):
                                     + display_name
                                 )
 
-                                target.attributes["Open_Street_Map"] = (
+                                target._attr_extra_state_attributes[ATTR_OPEN_STREET_MAP] = (
                                     display_name.replace(", ", " ")
                                 )
 
                                 if "licence" in osm_decoded:
                                     osm_attribution = '"' + osm_decoded["licence"] + '"'
-                                    target.attributes[ATTR_ATTRIBUTION] += (
+                                    target._attr_extra_state_attributes[ATTR_ATTRIBUTION] += (
                                         osm_attribution + "; "
                                     )
 
@@ -720,25 +623,22 @@ def setup_reverse_geocode(pli):
                                     ATTR_GEOCODED
                                     in pli.configuration[CONF_CREATE_SENSORS]
                                 ):
-                                    target.make_template_sensor(
-                                        "Open_Street_Map",
-                                        [
-                                            {ATTR_COMPASS_BEARING: compass_bearing},
-                                            ATTR_LATITUDE,
-                                            ATTR_LONGITUDE,
-                                            ATTR_SOURCE_TYPE,
-                                            ATTR_GPS_ACCURACY,
-                                            "icon",
-                                            {"locality": locality},
-                                            {
-                                                "location_time": new_location_time.strftime(
-                                                    "%Y-%m-%d %H:%M:%S"
-                                                )
-                                            },
-                                            {ATTR_ATTRIBUTION: osm_attribution},
-                                        ],
-                                    )
+                                    # Create the template sensor entity
+                                    attrs = {
+                                        ATTR_COMPASS_BEARING: compass_bearing,
+                                        ATTR_LATITUDE: new_latitude,
+                                        ATTR_LONGITUDE: new_longitude,
+                                        ATTR_SOURCE_TYPE: target._attr_extra_state_attributes.get(ATTR_SOURCE_TYPE),
+                                        ATTR_GPS_ACCURACY: target._attr_extra_state_attributes.get(ATTR_GPS_ACCURACY),
+                                        "icon": target._attr_extra_state_attributes.get("icon"),
+                                        "locality": locality,
+                                        "location_time": new_location_time.strftime("%Y-%m-%d %H:%M:%S"),
+                                        ATTR_ATTRIBUTION: osm_attribution,
+                                    }
+                                    create_and_register_template_sensor(pli.hass, target, ATTR_OPEN_STREET_MAP, display_name, attrs)
 
+                        #------- Google Maps -------------------------------------------
+        
                             if (
                                 pli.configuration[CONF_GOOGLE_API_KEY]
                                 != DEFAULT_API_KEY_NOT_SET
@@ -758,9 +658,9 @@ def setup_reverse_geocode(pli):
                                     + pli.configuration[CONF_GOOGLE_API_KEY]
                                 )
                                 google_decoded = {}
-                                google_response = httpx.get(google_url)
-                                google_json_input = google_response.text
-                                google_decoded = json.loads(google_json_input)
+                                async_client = get_async_client(pli.hass)  # HA-managed httpx.AsyncClient
+                                google_response = await async_client.get(google_url)  # await instead of blocking
+                                google_decoded = google_response.json()
 
                                 google_status = google_decoded["status"]
                                 if google_status != "OK":
@@ -785,7 +685,7 @@ def setup_reverse_geocode(pli):
                                                 + ") Google formatted_address = "
                                                 + formatted_address
                                             )
-                                            target.attributes["Google_Maps"] = (
+                                            target._attr_extra_state_attributes[ATTR_GOOGLE_MAPS] = (
                                                 formatted_address
                                             )
                                         for component in google_decoded["results"][0][
@@ -802,12 +702,12 @@ def setup_reverse_geocode(pli):
                                             elif (locality == "?") and (
                                                 "administrative_area_level_2"
                                                 in component["types"]
-                                            ):  # fall back to county
+                                            ):  # Fall back to county
                                                 locality = component["long_name"]
                                             elif (locality == "?") and (
                                                 "administrative_area_level_1"
                                                 in component["types"]
-                                            ):  # fall back to state
+                                            ):  # Fall back to state
                                                 locality = component["long_name"]
 
                                             if "country" in component["types"]:
@@ -817,7 +717,7 @@ def setup_reverse_geocode(pli):
                                                 )
 
                                         google_attribution = '"powered by Google"'
-                                        target.attributes[ATTR_ATTRIBUTION] += (
+                                        target._attr_extra_state_attributes[ATTR_ATTRIBUTION] += (
                                             google_attribution + "; "
                                         )
 
@@ -825,28 +725,20 @@ def setup_reverse_geocode(pli):
                                             ATTR_GEOCODED
                                             in pli.configuration[CONF_CREATE_SENSORS]
                                         ):
-                                            target.make_template_sensor(
-                                                "Google_Maps",
-                                                [
-                                                    {
-                                                        ATTR_COMPASS_BEARING: compass_bearing
-                                                    },
-                                                    ATTR_LATITUDE,
-                                                    ATTR_LONGITUDE,
-                                                    ATTR_SOURCE_TYPE,
-                                                    ATTR_GPS_ACCURACY,
-                                                    "icon",
-                                                    {"locality": locality},
-                                                    {
-                                                        "location_time": new_location_time.strftime(
-                                                            "%Y-%m-%d %H:%M:%S"
-                                                        )
-                                                    },
-                                                    {
-                                                        ATTR_ATTRIBUTION: google_attribution
-                                                    },
-                                                ],
-                                            )
+                                            attrs = {
+                                                ATTR_COMPASS_BEARING: compass_bearing,
+                                                ATTR_LATITUDE: new_latitude,
+                                                ATTR_LONGITUDE: new_longitude,
+                                                ATTR_SOURCE_TYPE: target._attr_extra_state_attributes.get(ATTR_SOURCE_TYPE),
+                                                ATTR_GPS_ACCURACY: target._attr_extra_state_attributes.get(ATTR_GPS_ACCURACY),
+                                                "icon": target._attr_extra_state_attributes.get("icon"),
+                                                "locality": locality,
+                                                "location_time": new_location_time.strftime("%Y-%m-%d %H:%M:%S"),
+                                                ATTR_ATTRIBUTION: google_attribution,
+                                            }
+                                            create_and_register_template_sensor(pli.hass, target, ATTR_GOOGLE_MAPS, formatted_address, attrs)
+
+                        #------- Mapquest ----------------------------------------------
 
                             if (
                                 pli.configuration[CONF_MAPQUEST_API_KEY]
@@ -865,7 +757,8 @@ def setup_reverse_geocode(pli):
                                     + pli.configuration[CONF_MAPQUEST_API_KEY]
                                 )
                                 mapquest_decoded = {}
-                                mapquest_response = httpx.get(mapquest_url)
+                                async_client = get_async_client(pli.hass)  # HA-managed httpx.AsyncClient
+                                mapquest_response = await async_client.get(mapquest_url)  # await instead of blocking
                                 mapquest_json_input = mapquest_response.text
                                 if not is_json(mapquest_json_input):
                                     _LOGGER.error(
@@ -913,7 +806,7 @@ def setup_reverse_geocode(pli):
                                                 )
                                             if (
                                                 "adminArea5" in mapquest_location
-                                            ):  # city
+                                            ):  # Like city
                                                 locality = mapquest_location[
                                                     "adminArea5"
                                                 ]
@@ -922,7 +815,7 @@ def setup_reverse_geocode(pli):
                                                 "adminArea4" in mapquest_location
                                                 and "adminArea4Type"
                                                 in mapquest_location
-                                            ):  # county
+                                            ):  # Like county
                                                 locality = (
                                                     mapquest_location["adminArea4"]
                                                     + " "
@@ -933,7 +826,7 @@ def setup_reverse_geocode(pli):
                                                 formatted_address += locality + ", "
                                             if (
                                                 "adminArea3" in mapquest_location
-                                            ):  # state
+                                            ):  # Like state
                                                 formatted_address += (
                                                     mapquest_location["adminArea3"]
                                                     + " "
@@ -947,7 +840,7 @@ def setup_reverse_geocode(pli):
                                                 "adminArea1" in mapquest_location
                                                 and mapquest_location["adminArea1"]
                                                 != "US"
-                                            ):  # country
+                                            ):  # Like country
                                                 formatted_address += mapquest_location[
                                                     "adminArea1"
                                                 ]
@@ -965,7 +858,7 @@ def setup_reverse_geocode(pli):
                                                     "(" + entity_id + ") mapquest waze_country_code = " + waze_country_code
                                                 )
 
-                                            target.attributes["MapQuest"] = (
+                                            target._attr_extra_state_attributes[ATTR_MAPQUEST] = (
                                                 formatted_address
                                             )
 
@@ -983,7 +876,7 @@ def setup_reverse_geocode(pli):
                                                 ]
                                                 + '"'
                                             )
-                                            target.attributes[ATTR_ATTRIBUTION] += (
+                                            target._attr_extra_state_attributes[ATTR_ATTRIBUTION] += (
                                                 mapquest_attribution + "; "
                                             )
 
@@ -993,43 +886,37 @@ def setup_reverse_geocode(pli):
                                                     CONF_CREATE_SENSORS
                                                 ]
                                             ):
-                                                target.make_template_sensor(
-                                                    "MapQuest",
-                                                    [
-                                                        {
-                                                            ATTR_COMPASS_BEARING: compass_bearing
-                                                        },
-                                                        ATTR_LATITUDE,
-                                                        ATTR_LONGITUDE,
-                                                        ATTR_SOURCE_TYPE,
-                                                        ATTR_GPS_ACCURACY,
-                                                        "icon",
-                                                        {"locality": locality},
-                                                        {
-                                                            "location_time": new_location_time.strftime(
-                                                                "%Y-%m-%d %H:%M:%S"
-                                                            )
-                                                        },
-                                                        {
-                                                            ATTR_ATTRIBUTION: mapquest_attribution
-                                                        },
-                                                    ],
-                                                )
-
-                            target.attributes["locality"] = locality
-                            target.this_entity_info["locality"] = locality
-                            target.this_entity_info["geocode_count"] += 1
-                            target.this_entity_info["location_latitude"] = new_latitude
-                            target.this_entity_info["location_longitude"] = (
+                                                attrs = {
+                                                    ATTR_COMPASS_BEARING: compass_bearing,
+                                                    ATTR_LATITUDE: new_latitude,
+                                                    ATTR_LONGITUDE: new_longitude,
+                                                    ATTR_SOURCE_TYPE: target._attr_extra_state_attributes.get(ATTR_SOURCE_TYPE),
+                                                    ATTR_GPS_ACCURACY: target._attr_extra_state_attributes.get(ATTR_GPS_ACCURACY),
+                                                    "icon": target._attr_extra_state_attributes.get("icon"),
+                                                    "locality": locality,
+                                                    "location_time": new_location_time.strftime("%Y-%m-%d %H:%M:%S"),
+                                                    ATTR_ATTRIBUTION: mapquest_attribution,
+                                                }
+                                                create_and_register_template_sensor(pli.hass, target, ATTR_MAPQUEST, formatted_address, attrs)
+                        #------- All ---------------------------------------------------
+                            
+                            target._attr_extra_state_attributes["locality"] = locality
+                            target.this_entity_info[INFO_LOCALITY] = locality
+                            target.this_entity_info[INFO_GEOCODE_COUNT] += 1
+                            target.this_entity_info[INFO_LOCATION_LATITUDE] = (
+                                new_latitude
+                            )
+                            target.this_entity_info[INFO_LOCATION_LONGITUDE] = (
                                 new_longitude
                             )
                             target.this_entity_info["reverse_geocode_location_time"] = (
                                 new_location_time
                             )
 
-                            # Call WazeRouteCalculator if not at Home:
+                            # Call WazeRouteCalculator or alternate:
 
-                            _get_waze_driving_miles_and_minutes(
+                            await update_driving_miles_and_minutes(
+                                pli,
                                 target,
                                 new_latitude,
                                 new_longitude,
@@ -1038,13 +925,13 @@ def setup_reverse_geocode(pli):
 
                         # Determine friendly_name_location and new_bread_crumb:
 
-                        if target.attributes["reported_state"].lower() in [
+                        if target._attr_extra_state_attributes[ATTR_REPORTED_STATE].lower() in [
                             STATE_HOME,
                             STATE_ON,
                         ]:
                             new_bread_crumb = "Home"
                             friendly_name_location = "is Home"
-                        elif target.attributes["reported_state"].lower() in [
+                        elif target._attr_extra_state_attributes[ATTR_REPORTED_STATE].lower() in [
                             "away",
                             STATE_NOT_HOME,
                             STATE_OFF,
@@ -1052,11 +939,11 @@ def setup_reverse_geocode(pli):
                             new_bread_crumb = "Away"
                             friendly_name_location = "is Away"
                         else:
-                            new_bread_crumb = target.attributes["reported_state"]
+                            new_bread_crumb = target._attr_extra_state_attributes[ATTR_REPORTED_STATE]
                             friendly_name_location = f"is at {new_bread_crumb}"
 
-                        if "zone" in target.attributes:
-                            reportedZone = target.attributes["zone"]
+                        if "zone" in target._attr_extra_state_attributes:
+                            reportedZone = target._attr_extra_state_attributes["zone"]
                             zoneStateObject = pli.hass.states.get(
                                 ZONE_DOMAIN + "." + reportedZone
                             )
@@ -1074,9 +961,9 @@ def setup_reverse_geocode(pli):
 
                         if (
                             new_bread_crumb == "Away"
-                            and "locality" in target.attributes
+                            and "locality" in target._attr_extra_state_attributes
                         ):
-                            new_bread_crumb = target.attributes["locality"]
+                            new_bread_crumb = target._attr_extra_state_attributes["locality"]
                             friendly_name_location = f"is in {new_bread_crumb}"
 
                         _LOGGER.debug(
@@ -1088,38 +975,39 @@ def setup_reverse_geocode(pli):
 
                         # Append location to bread_crumbs attribute:
 
-                        if ATTR_BREAD_CRUMBS in target.attributes:
-                            old_bread_crumbs = target.attributes[ATTR_BREAD_CRUMBS]
+                        if ATTR_BREAD_CRUMBS in target._attr_extra_state_attributes:
+                            old_bread_crumbs = target._attr_extra_state_attributes[ATTR_BREAD_CRUMBS]
                             if not old_bread_crumbs.endswith(new_bread_crumb):
-                                target.attributes[ATTR_BREAD_CRUMBS] = (
+                                target._attr_extra_state_attributes[ATTR_BREAD_CRUMBS] = (
                                     old_bread_crumbs + "> " + new_bread_crumb
                                 )[-255:]
                         else:
-                            target.attributes[ATTR_BREAD_CRUMBS] = new_bread_crumb
+                            target._attr_extra_state_attributes[ATTR_BREAD_CRUMBS] = new_bread_crumb
 
                         if template != "NONE":
                             # Format friendly_name attribute using the supplied friendly_name_template:
 
                             if (
-                                "source" in target.attributes
-                                and "." in target.attributes["source"]
+                                ATTR_SOURCE in target._attr_extra_state_attributes
+                                and "." in target._attr_extra_state_attributes[ATTR_SOURCE]
                             ):
-                                sourceEntity = target.attributes["source"]
+                                sourceEntity = target._attr_extra_state_attributes[ATTR_SOURCE]
                                 sourceObject = pli.hass.states.get(sourceEntity)
                                 if (
                                     sourceObject is not None
-                                    and "source" in sourceObject.attributes
-                                    and "." in target.attributes["source"]
+                                    and ATTR_SOURCE in sourceObject.attributes
+                                    and "." in target._attr_extra_state_attributes[ATTR_SOURCE]
                                 ):
                                     # Find the source for a person entity:
-                                    sourceEntity = sourceObject.attributes["source"]
+                                    sourceEntity = sourceObject.attributes[ATTR_SOURCE]
                                     sourceObject = pli.hass.states.get(sourceEntity)
                             else:
-                                sourceObject = target
+                                sourceEntity = target.entity_id
+                                sourceObject = pli.hass.states.get(sourceEntity)
 
                             friendly_name_variables = {
                                 "friendly_name_location": friendly_name_location,
-                                "person_name": target.attributes["person_name"],
+                                "person_name": target._attr_extra_state_attributes["person_name"],
                                 "source": {
                                     "entity_id": sourceEntity,
                                     "state": sourceObject.state,
@@ -1128,20 +1016,27 @@ def setup_reverse_geocode(pli):
                                 "target": {
                                     "entity_id": target.entity_id,
                                     "state": target.state,
-                                    "attributes": target.attributes,
+                                    "attributes": target._attr_extra_state_attributes,
                                 },
                             }
-                            #        _LOGGER.debug(f"friendly_name_variables = {friendly_name_variables}")
+                            # _LOGGER.debug(f"friendly_name_variables = {friendly_name_variables}")
 
-                            try:
-                                target.attributes["friendly_name"] = (
+                            try: 
+                                new_friendly_name = (
                                     Template(
-                                        pli.configuration[CONF_FRIENDLY_NAME_TEMPLATE]
+                                        pli.configuration.get(
+                                            CONF_FRIENDLY_NAME_TEMPLATE,
+                                            DEFAULT_FRIENDLY_NAME_TEMPLATE,
+                                        )
                                     )
                                     .render(**friendly_name_variables)
                                     .replace("()", "")
                                     .replace("  ", " ")
                                 )
+                                target._attr_extra_state_attributes["friendly_name"] = new_friendly_name
+                                target._attr_name = new_friendly_name
+                                _LOGGER.debug(f"new_friendly_name = {new_friendly_name}")
+                                
                             except TemplateError as err:
                                 _LOGGER.error(
                                     "Error parsing friendly_name_template: %s", err
@@ -1151,7 +1046,7 @@ def setup_reverse_geocode(pli):
 
                             target.make_template_sensors()
 
-                        _LOGGER.debug("TARGET_LOCK release...")
+                        _LOGGER.debug("TARGET_ASYNCIO_LOCK release...")
             except Exception as e:
                 _LOGGER.error(
                     "(%s) Exception %s: %s" % (entity_id, type(e).__name__, str(e))
@@ -1160,9 +1055,9 @@ def setup_reverse_geocode(pli):
                 pli.attributes["api_error_count"] += 1
 
             pli.set_state()
-            _LOGGER.debug("INTEGRATION_LOCK release...")
+            _LOGGER.debug("INTEGRATION_ASYNCIO_LOCK release...")
         _LOGGER.debug("(%s) === Return ===", entity_id)
 
-    pli.hass.services.register(DOMAIN, "reverse_geocode", handle_reverse_geocode)
+    pli.hass.services.async_register(DOMAIN, "reverse_geocode", handle_reverse_geocode)
     return True
 
