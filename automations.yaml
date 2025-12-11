@@ -5527,6 +5527,18 @@
     entity_id: binary_sensor.time_of_day_nighttime
     state:
     - 'on'
+    enabled: false
+  - condition: time
+    after: '16:00:00'
+    before: 00:00:00
+    weekday:
+    - sun
+    - mon
+    - tue
+    - wed
+    - thu
+    - fri
+    - sat
   actions:
   - choose:
     - conditions:
