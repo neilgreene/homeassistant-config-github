@@ -2416,11 +2416,13 @@
         metadata: {}
         data:
           message: Jaydon is left home.
+        enabled: false
       - action: notify.send_message
         data:
           message: Jaydon has left home.
         target:
           entity_id: notify.upstairs_office_show_speak
+        enabled: false
     - conditions:
       - condition: trigger
         id: work_arrive
@@ -5760,3 +5762,74 @@
         entity_id: 66ef633d1789fa895e967fe6201d1272
         domain: light
   mode: single
+- id: '1765673592582'
+  alias: '[TRACKING]: Jaydon Leaves Home Notification'
+  description: '
+
+    '
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.jaydon_home_stable
+    to:
+    - 'off'
+    id: home_leave
+    for:
+      hours: 0
+      minutes: 3
+      seconds: 0
+    from:
+    - 'on'
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  - condition: and
+    conditions:
+    - condition: numeric_state
+      entity_id: sensor.ha_uptime_minutes
+      above: 5
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: home_leave
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        metadata: {}
+        data:
+          message: Jaydon is left home.
+      - action: notify.send_message
+        data:
+          message: Jaydon has left home.
+        target:
+          entity_id: notify.upstairs_office_show_speak
+  mode: single
+- id: '1765676719173'
+  alias: '[TRACKING]: Chloe Leaves Home Notification'
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.chloe_home_stable
+    to:
+    - 'off'
+    id: home_leave
+    for:
+      hours: 0
+      minutes: 3
+      seconds: 0
+  conditions:
+  - condition: state
+    entity_id: input_boolean.automations_enabled
+    state: 'on'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: home_leave
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Chloe has left home.
+  mode: restart
