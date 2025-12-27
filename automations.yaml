@@ -2550,6 +2550,26 @@
     zone: zone.concordia
     event: leave
     id: school_leave
+  - trigger: zone
+    entity_id: person.chloe_greene
+    zone: zone.hoag
+    event: enter
+    id: hoag_arrive
+  - trigger: zone
+    entity_id: person.chloe_greene
+    zone: zone.hoag
+    event: leave
+    id: hoag_leave
+  - trigger: zone
+    entity_id: person.chloe_greene
+    zone: zone.treyons
+    event: enter
+    id: treyons_arrive
+  - trigger: zone
+    entity_id: person.chloe_greene
+    zone: zone.treyons
+    event: leave
+    id: treyons_leave
   conditions:
   - condition: state
     entity_id: input_boolean.automations_enabled
@@ -2613,6 +2633,34 @@
       - action: notify.mobile_app_neils_iphone
         data:
           message: Chloe has left school.
+    - conditions:
+      - condition: trigger
+        id: hoag_arrive
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Chloe has arrived at Hoag.
+    - conditions:
+      - condition: trigger
+        id: hoag_leave
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Chloe has left Hoag.
+    - conditions:
+      - condition: trigger
+        id: treyons_arrive
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Chloe has arrived at Treyon's.
+    - conditions:
+      - condition: trigger
+        id: treyons_leave
+      sequence:
+      - action: notify.mobile_app_neils_iphone
+        data:
+          message: Chloe has left Treyon's.
   mode: restart
 - id: watchdog_presence_enforcer
   alias: '[WATCHDOG]: Turn devices off when home is left unoccupied.'
