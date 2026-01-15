@@ -17,6 +17,7 @@ from .const_integration import (
     CONF_DEVICE_ID,
     CONF_ENTITIES,
     CONF_TRACK,
+    CONST_GROUP,
     YAML_CALENDARS_FILENAME,
 )
 from .schema_integration import YAML_CALENDAR_DEVICE_SCHEMA
@@ -53,9 +54,8 @@ def write_yaml_file(yaml_filepath, cal):
     """Write to the calendar file."""
     dirpath = os.path.dirname(yaml_filepath)
     if not os.path.isdir(dirpath):
-        os.makedirs(dirpath)
+        os.makedirs(dirpath)  # pragma: no cover
     with open(yaml_filepath, "a", encoding="UTF8") as out:
-        out.write("\n")
         yaml.dump([cal], out, default_flow_style=False, encoding="UTF8")
         out.close()
 
@@ -89,6 +89,31 @@ async def async_update_calendar_file(
     if cal[CONF_CAL_ID] in existing_calendars:
         return
     await hass.async_add_executor_job(write_yaml_file, yaml_filepath, cal)
+
+
+async def async_check_for_deleted_calendars(entry: MS365ConfigEntry, calendars, hass):
+    """Delete removed calendars from yaml file."""
+    path = build_yaml_filename(entry, YAML_CALENDARS_FILENAME)
+    yaml_filepath = build_yaml_file_path(hass, path)
+    existing_calendars = await hass.async_add_executor_job(
+        load_yaml_file, yaml_filepath, CONF_CAL_ID, YAML_CALENDAR_DEVICE_SCHEMA
+    )
+    updated_calendars = []
+    deleted_calendars = []
+    for e_cal_id in existing_calendars.keys():
+        if e_cal_id.startswith(CONST_GROUP) or e_cal_id in [
+            calendar.calendar_id for calendar in calendars
+        ]:
+            updated_calendars.append(existing_calendars[e_cal_id])
+            continue
+        _LOGGER.info("Calendar deleted from %s: %s", path, e_cal_id)
+
+        deleted_calendars.append(existing_calendars[e_cal_id])
+    if deleted_calendars:
+        await hass.async_add_executor_job(
+            write_calendar_yaml_file, yaml_filepath, updated_calendars
+        )
+    return deleted_calendars
 
 
 def build_yaml_filename(conf: MS365ConfigEntry, filename):

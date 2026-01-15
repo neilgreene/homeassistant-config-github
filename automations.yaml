@@ -5843,6 +5843,11 @@
       - condition: trigger
         id: home_leave
       sequence:
+      - action: light.turn_off
+        metadata: {}
+        target:
+          entity_id: light.jaydon_s_room
+        data: {}
       - action: notify.mobile_app_neils_iphone
         metadata: {}
         data:
