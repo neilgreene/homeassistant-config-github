@@ -55,6 +55,7 @@ create_calendar_event:
     categories:
       selector:
         text:
+          multiple: true
     sensitivity:
       example: normal
       selector:
@@ -94,6 +95,20 @@ create_calendar_event:
     attendees:
       selector:
         object:
+    is_reminder_on:
+      example: True
+      required: false
+      default: true
+      selector:
+        boolean:
+    remind_before_minutes:
+      example: 15
+      selector:
+        number:
+          step: 1
+          min: 0
+          max: 1440
+          unit_of_measurement: minutes
 
 modify_calendar_event:
   target:
@@ -129,6 +144,7 @@ modify_calendar_event:
     categories:
       selector:
         text:
+          multiple: true
     sensitivity:
       example: normal
       selector:
@@ -168,6 +184,18 @@ modify_calendar_event:
     attendees:
       selector:
         object:
+    is_reminder_on:
+      example: True
+      selector:
+        boolean:
+    remind_before_minutes:
+      example: 15
+      selector:
+        number:
+          step: 1
+          min: 0
+          max: 1440
+          unit_of_measurement: minutes
 
 remove_calendar_event:
   target:
@@ -180,4 +208,3 @@ remove_calendar_event:
       required: true
       selector:
         text:
-

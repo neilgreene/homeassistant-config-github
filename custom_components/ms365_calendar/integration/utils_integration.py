@@ -6,7 +6,6 @@ from datetime import datetime
 from dateutil import parser
 from homeassistant.helpers import entity_registry
 from homeassistant.util import slugify
-
 from O365.calendar import Attendee  # pylint: disable=no-name-in-module)
 
 from ..classes.config_entry import MS365ConfigEntry
@@ -17,7 +16,9 @@ from .const_integration import (
     ATTR_BODY,
     ATTR_CATEGORIES,
     ATTR_IS_ALL_DAY,
+    ATTR_IS_REMINDER_ON,
     ATTR_LOCATION,
+    ATTR_REMIND_BEFORE_MINUTES,
     ATTR_RRULE,
     ATTR_SENSITIVITY,
     ATTR_SHOW_AS,
@@ -80,6 +81,13 @@ def add_call_data_to_event(event, subject, start, end, **kwargs):
     event.show_as = _add_attribute(kwargs.get(ATTR_SHOW_AS, None), event.show_as)
     event.start = _add_attribute(start, event.start)
     event.end = _add_attribute(end, event.end)
+    event.is_reminder_on = _add_attribute(
+        kwargs.get(ATTR_IS_REMINDER_ON, None), event.is_reminder_on
+    )
+    if event.is_reminder_on:
+        event.remind_before_minutes = _add_attribute(
+            kwargs.get(ATTR_REMIND_BEFORE_MINUTES, None), event.remind_before_minutes
+        )
     event.sensitivity = _add_attribute(
         kwargs.get(ATTR_SENSITIVITY, None), event.sensitivity
     )
@@ -92,7 +100,7 @@ def add_call_data_to_event(event, subject, start, end, **kwargs):
 
 
 def _add_attribute(attribute, event_attribute):
-    return attribute or event_attribute
+    return attribute if attribute is not None else event_attribute
 
 
 def _add_attendees(attendees, event):

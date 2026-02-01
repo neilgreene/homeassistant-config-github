@@ -27,8 +27,10 @@ from .const_integration import (
     ATTR_END,
     ATTR_EVENT_ID,
     ATTR_IS_ALL_DAY,
+    ATTR_IS_REMINDER_ON,
     ATTR_LOCATION,
     ATTR_MESSAGE,
+    ATTR_REMIND_BEFORE_MINUTES,
     ATTR_RESPONSE,
     ATTR_SEND_RESPONSE,
     ATTR_SENSITIVITY,
@@ -59,7 +61,8 @@ def _has_consistent_timezone(*keys: Any) -> Callable[[dict[str, Any]], dict[str,
         """Test that all keys that are datetime values have the same timezone."""
         tzinfos = []
         for key in keys:
-            tzinfos.append(obj.get(key).tzinfo)
+            if obj.get(key):
+                tzinfos.append(obj.get(key).tzinfo)
         uniq_values = groupby(tzinfos)
         if len(list(uniq_values)) > 1:
             raise vol.Invalid("Expected all values to have the same timezone")
@@ -110,11 +113,17 @@ CALENDAR_SERVICE_CREATE_SCHEMA = vol.All(
             vol.Required(ATTR_END): cv.datetime,
             vol.Optional(ATTR_BODY): cv.string,
             vol.Optional(ATTR_LOCATION): cv.string,
-            vol.Optional(ATTR_CATEGORIES): [cv.string],
+            vol.Optional(ATTR_CATEGORIES, default=list): vol.All(
+                cv.ensure_list, [cv.string]
+            ),
             vol.Optional(ATTR_SENSITIVITY): vol.Coerce(EventSensitivity),
             vol.Optional(ATTR_SHOW_AS): vol.Coerce(EventShowAs),
             vol.Optional(ATTR_IS_ALL_DAY): bool,
             vol.Optional(ATTR_ATTENDEES): [CALENDAR_SERVICE_ATTENDEE_SCHEMA],
+            vol.Optional(ATTR_IS_REMINDER_ON): bool,
+            vol.Optional(ATTR_REMIND_BEFORE_MINUTES): vol.All(
+                vol.Coerce(int), vol.Range(min=0, max=1440)
+            ),
         }
     ),
     _has_consistent_timezone(ATTR_START, ATTR_END),
@@ -129,12 +138,17 @@ CALENDAR_SERVICE_MODIFY_SCHEMA = vol.All(
             vol.Optional(ATTR_END): cv.datetime,
             vol.Optional(ATTR_SUBJECT): cv.string,
             vol.Optional(ATTR_BODY): cv.string,
-            vol.Optional(ATTR_LOCATION): cv.string,
-            vol.Optional(ATTR_CATEGORIES): [cv.string],
+            vol.Optional(ATTR_CATEGORIES, default=list): vol.All(
+                cv.ensure_list, [cv.string]
+            ),
             vol.Optional(ATTR_SENSITIVITY): vol.Coerce(EventSensitivity),
             vol.Optional(ATTR_SHOW_AS): vol.Coerce(EventShowAs),
             vol.Optional(ATTR_IS_ALL_DAY): bool,
             vol.Optional(ATTR_ATTENDEES): [CALENDAR_SERVICE_ATTENDEE_SCHEMA],
+            vol.Optional(ATTR_IS_REMINDER_ON): bool,
+            vol.Optional(ATTR_REMIND_BEFORE_MINUTES): vol.All(
+                vol.Coerce(int), vol.Range(min=0, max=1440)
+            ),
         }
     ),
     _has_consistent_timezone(ATTR_START, ATTR_END),
