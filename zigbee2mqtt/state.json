@@ -1,10 +1,5 @@
 {
     "0xffffb40e0603910e": {
-        "update": {
-            "state": "idle",
-            "installed_version": 55,
-            "latest_version": 55
-        },
         "vibration": false,
         "tamper": false,
         "battery_low": false,
