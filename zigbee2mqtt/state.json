@@ -1,13 +1,13 @@
 {
     "0xffffb40e0603910e": {
-        "vibration": false,
+        "vibration": true,
         "tamper": false,
         "battery_low": false,
         "voltage": 3000,
         "battery": 100,
-        "x_axis": 882,
-        "y_axis": 232,
-        "z_axis": -685,
+        "x_axis": 1181,
+        "y_axis": 175,
+        "z_axis": 572,
         "linkquality": 172
     },
     "0x54ef44100146e0d6": {
@@ -114,8 +114,8 @@
         "ai_interference_source_selfidentification": "OFF",
         "ai_sensitivity_adaptive": "ON",
         "illuminance": 1,
-        "humidity": 25,
-        "temperature": 21.58,
+        "humidity": 30,
+        "temperature": 25.25,
         "temp_&_humidity_sampling": "low",
         "temp_&_humidity_sampling_period": 600,
         "temp_reporting_interval": 3600,
