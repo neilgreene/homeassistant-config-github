@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a Home Assistant configuration repository running version 2025.10.4. The setup uses a **modular YAML architecture** where the main `configuration.yaml` acts as a hub that includes separate files for each domain (automations, sensors, scripts, etc.). This allows for better organization and maintainability of the large configuration (88 automations, 5476 lines in automations.yaml).
+This is a Home Assistant configuration repository running version 2026.2.1. The setup uses a **modular YAML architecture** where the main `configuration.yaml` acts as a hub that includes separate files for each domain (automations, sensors, scripts, etc.). This allows for better organization and maintainability of the large configuration (95 automations, ~5,900 lines in automations.yaml).
 
 ## Architecture
 
@@ -12,11 +12,13 @@ This is a Home Assistant configuration repository running version 2025.10.4. The
 
 The repository follows a **split configuration** pattern:
 - `configuration.yaml` - Main hub that includes all other files
-- `automations.yaml` - All automation definitions (88 automations)
-- `templates.yaml` - Template sensors and binary sensors
-- `sensors.yaml` - Platform-based sensors (MQTT, REST, etc.)
+- `automations.yaml` - All automation definitions (95 automations)
+- `templates.yaml` - Template sensors and binary sensors (~1,100 lines)
+- `sensors.yaml` - Platform-based sensors (MQTT, REST, command_line)
 - `scripts.yaml` - Reusable script definitions
 - `secrets.yaml` - Sensitive credentials (never commit changes to this)
+- Additional includes: `calendars.yaml`, `geolocations.yaml`, `groups.yaml`, `input_booleans.yaml`, `input_selects.yaml`, `input_text.yaml`, `intent_script.yaml`, `lights.yaml`, `scenes.yaml`, `switches.yaml`, `yahoofinance.yaml`
+- `packages/` - Directory for feature-bundled packages (currently empty, but wired via `!include_dir_named`)
 
 ### Categorization System
 
@@ -36,13 +38,19 @@ Automations use a **prefix-based categorization** in their aliases:
 - `[SCHEDULE]` - Time-based automations
 - `[MODE]` - Home mode changes (Normal/Guest/Vacation)
 - `[DO NOT DISTURB]` - DND announcements per room
+- `[LAUNDRY]` - Washer/dryer monitoring
+- `[TRACKING]` - Person/device tracking
+- `[MEDICATION]` - Medication reminders
+- `[ACCESS]` - Access control
+- `[TAG SCANNED]` - NFC tag automations
+- `[WATCHDOG]` - System watchdog automations
+- `[BUG]` - Bug workarounds/fixes
 
 When creating or modifying automations, **always use the appropriate category prefix** in the alias.
 
 ### Key Integrations
 
-**Custom Components** (20 total in `custom_components/`):
-- `icloud3` - iCloud presence detection
+**Custom Components** (18 total in `custom_components/`):
 - `alexa_media` - Alexa device control and TTS
 - `ms365_calendar` - Microsoft 365 calendar integration
 - `area_occupancy` - Room occupancy tracking
@@ -53,7 +61,8 @@ When creating or modifying automations, **always use the appropriate category pr
 - `bermuda` - Bluetooth-based presence detection
 - `yahoofinance` - Stock price tracking
 - `scrypted` - Camera integration
-- Others: `nodered`, `ha_strava`, `teamtracker`, `cync_lights`, `hubspace`, `unifi_voucher`, `hass_agent`, `custom_areas`
+- `dyson_local` - Dyson device integration
+- Others: `ha_strava`, `teamtracker`, `cync_lights`, `hubspace`, `unifi_voucher`, `hass_agent`, `custom_areas`
 
 **ESPHome Devices** (in `esphome/`):
 - 4 bed presence sensors (pressure-based detection)
@@ -180,10 +189,10 @@ Custom components in `custom_components/` are typically managed by HACS. To upda
 - Device-specific notify services: `notify.upstairs_office_show_announce`, `notify.kitchen_show_speak`, etc.
 
 ### Presence Detection (Multi-layered)
-- iCloud3 (GPS-based)
-- Bluetooth via ESPresense/MQTT (room-level via `mqtt_room` sensors)
+- Bluetooth via Bermuda/MQTT (room-level via `mqtt_room` sensors)
 - `person_location` custom component for enhanced tracking
 - Bed presence via ESPHome pressure sensors
+- Stable presence binary sensors in templates (per-person)
 
 ### Home Modes
 - Managed via `input_select.home_mode`
