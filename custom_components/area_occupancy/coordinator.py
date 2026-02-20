@@ -69,6 +69,7 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._save_timer: CALLBACK_TYPE | None = None
         self._setup_complete: bool = False
         self._analysis_running: bool = False
+        self._cached_correlations: dict[str, dict[str, float]] = {}
 
     async def async_init_database(self) -> None:
         """Initialize the database asynchronously to avoid blocking the event loop.
@@ -90,6 +91,50 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Failed to initialize database for entry %s: %s", self.entry_id, err
             )
             raise
+
+    async def async_refresh_correlations(self) -> None:
+        """Refresh cached entity correlations for all areas from database.
+
+        Loads correlations via executor to avoid blocking the event loop,
+        then stores them on the coordinator for synchronous access during
+        probability calculations.
+        """
+        if self.db is None:
+            return
+
+        for area_name in self.areas:
+            try:
+                from .db.correlation import get_entity_correlations  # noqa: PLC0415
+
+                correlations = await self.hass.async_add_executor_job(
+                    get_entity_correlations, self.db, area_name
+                )
+                self._cached_correlations[area_name] = correlations
+            except ImportError:
+                _LOGGER.debug(
+                    "Failed to import correlation module for area %s",
+                    area_name,
+                    exc_info=True,
+                )
+                self._cached_correlations[area_name] = {}
+            except (AttributeError, ValueError, OSError, RuntimeError):
+                _LOGGER.debug(
+                    "Failed to load entity correlations for area %s",
+                    area_name,
+                    exc_info=True,
+                )
+                self._cached_correlations[area_name] = {}
+
+    def get_cached_correlations(self, area_name: str) -> dict[str, float]:
+        """Return cached correlation strengths for the given area.
+
+        Args:
+            area_name: Name of the area to get correlations for
+
+        Returns:
+            Dict of entity_id -> correlation strength. Empty dict if no data.
+        """
+        return self._cached_correlations.get(area_name, {})
 
     def _load_areas_from_config(
         self, target_dict: dict[str, Area] | None = None
@@ -264,6 +309,9 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Load data from database
             await self.db.load_data()
 
+            # Load cached correlations for probability calculations
+            await self.async_refresh_correlations()
+
             # Ensure areas and entities exist in database and persist configuration/state
             # This must happen before analysis runs so that get_occupied_intervals() can
             # properly JOIN Intervals with Entities table
@@ -306,27 +354,8 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Failed to set up coordinator: %s", err)
             raise ConfigEntryNotReady(f"Failed to set up coordinator: {err}") from err
         except (OSError, RuntimeError) as err:
-            _LOGGER.error("Unexpected error during coordinator setup: %s", err)
-            # Try to continue with basic functionality even if some parts fail
-            _LOGGER.info(
-                "Continuing with basic coordinator functionality despite errors"
-            )
-            try:
-                # Start basic timers
-                self._start_decay_timer()
-                self._start_save_timer()
-                # Analysis timer is async and runs in background
-                await self._start_analysis_timer()
-
-                self._setup_complete = True
-
-            except (HomeAssistantError, OSError, RuntimeError) as timer_err:
-                _LOGGER.error(
-                    "Failed to start basic timers for areas: %s: %s",
-                    format_area_names(self),
-                    timer_err,
-                )
-                # Don't set _setup_complete if timers completely failed
+            _LOGGER.exception("Unexpected error during coordinator setup")
+            raise ConfigEntryNotReady(f"Setup failed: {err}. Will retry.") from err
 
     async def update(self) -> dict[str, Any]:
         """Update and return the current coordinator data (in-memory only).
@@ -588,6 +617,9 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # This is critical to restore state after config changes without requiring a full reload
         await self.db.load_data()
 
+        # Refresh cached correlations for new areas
+        await self.async_refresh_correlations()
+
         # Re-establish entity state tracking with new entity lists
         all_entity_ids = []
         for area in self.areas.values():
@@ -771,24 +803,26 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._analysis_timer = None
 
         self._analysis_running = True
+        _failed = False
         try:
             # Run the full analysis chain
             await run_full_analysis(self, _now)
-
-            # Schedule next run (1 hour interval)
-            next_update = _now + timedelta(
-                seconds=self.integration_config.analysis_interval
-            )
-            self._analysis_timer = async_track_point_in_time(
-                self.hass, self.run_analysis, next_update
-            )
-
         except (HomeAssistantError, OSError, RuntimeError) as err:
             _LOGGER.error("Failed to run historical analysis: %s", err)
-            # Reschedule analysis even if it failed
-            next_update = _now + timedelta(minutes=15)  # Retry sooner if failed
+            _failed = True
+        except Exception:
+            # Last-resort safety net — keeps the analysis timer alive
+            _LOGGER.exception("Unexpected analysis error")
+            _failed = True
+        finally:
+            self._analysis_running = False
+            # Always reschedule — retry sooner on failure
+            if _failed:
+                next_update = _now + timedelta(minutes=15)
+            else:
+                next_update = _now + timedelta(
+                    seconds=self.integration_config.analysis_interval
+                )
             self._analysis_timer = async_track_point_in_time(
                 self.hass, self.run_analysis, next_update
             )
-        finally:
-            self._analysis_running = False

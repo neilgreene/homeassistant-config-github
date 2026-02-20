@@ -51,6 +51,7 @@ from .const import (
     CONF_ACTION_CANCEL,
     CONF_ACTION_EDIT,
     CONF_ACTION_GLOBAL_SETTINGS,
+    CONF_ACTION_MANAGE_PEOPLE,
     CONF_ACTION_REMOVE,
     CONF_AIR_QUALITY_SENSORS,
     CONF_APPLIANCE_ACTIVE_STATES,
@@ -75,6 +76,12 @@ from .const import (
     CONF_MOTION_SENSORS,
     CONF_MOTION_TIMEOUT,
     CONF_OPTION_PREFIX_AREA,
+    CONF_PEOPLE,
+    CONF_PERSON_CONFIDENCE_THRESHOLD,
+    CONF_PERSON_DEVICE_TRACKER,
+    CONF_PERSON_ENTITY,
+    CONF_PERSON_SLEEP_AREA,
+    CONF_PERSON_SLEEP_SENSOR,
     CONF_PM10_SENSORS,
     CONF_PM25_SENSORS,
     CONF_POWER_SENSORS,
@@ -113,6 +120,7 @@ from .const import (
     DEFAULT_MOTION_PROB_GIVEN_TRUE,
     DEFAULT_MOTION_TIMEOUT,
     DEFAULT_PURPOSE,
+    DEFAULT_SLEEP_CONFIDENCE_THRESHOLD,
     DEFAULT_SLEEP_END,
     DEFAULT_SLEEP_START,
     DEFAULT_THRESHOLD,
@@ -135,7 +143,7 @@ from .const import (
     get_default_state,
     get_state_options,
 )
-from .data.purpose import PURPOSE_DEFINITIONS, AreaPurpose, get_purpose_options
+from .data.purpose import Purpose, get_purpose_options
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -320,8 +328,8 @@ def _get_include_entities(hass: HomeAssistant) -> dict[str, list[str]]:
                 or (
                     not has_window_keyword
                     and (
-                        device_class in (BinarySensorDeviceClass.OPENING,)
-                        or original_device_class in (BinarySensorDeviceClass.OPENING,)
+                        BinarySensorDeviceClass.OPENING
+                        in (device_class, original_device_class)
                     )
                 )
             )
@@ -472,9 +480,9 @@ def _create_motion_section_schema(
                 ),
             ): NumberSelector(
                 NumberSelectorConfig(
-                    min=MIN_PROBABILITY,
+                    min=0.001,
                     max=MAX_PROBABILITY,
-                    step=0.01,
+                    step=0.001,
                     mode=NumberSelectorMode.BOX,
                 )
             ),
@@ -1070,11 +1078,7 @@ def _get_purpose_display_name(purpose: str) -> str:
     Returns:
         Human-readable purpose name
     """
-    try:
-        purpose_enum = AreaPurpose(purpose)
-        return PURPOSE_DEFINITIONS[purpose_enum].name
-    except (ValueError, KeyError):
-        return purpose.replace("_", " ").title()
+    return Purpose.display_name(purpose)
 
 
 def _find_area_by_sanitized_id(
@@ -1180,15 +1184,7 @@ def _apply_purpose_based_decay_default(
         return
 
     user_set_decay = flattened_input.get(CONF_DECAY_HALF_LIFE)
-    purpose_half_lives = {
-        purpose_def.half_life for purpose_def in PURPOSE_DEFINITIONS.values()
-    }
-    purpose_half_lives.add(DEFAULT_DECAY_HALF_LIFE)
-    if (
-        user_set_decay is None
-        or user_set_decay == DEFAULT_DECAY_HALF_LIFE
-        or user_set_decay in purpose_half_lives
-    ):
+    if user_set_decay is None or Purpose.is_purpose_half_life(user_set_decay):
         # Set to 0 to indicate "use purpose value"
         flattened_input[CONF_DECAY_HALF_LIFE] = 0
 
@@ -1279,6 +1275,52 @@ def _remove_area_from_list(
         Updated list of areas with specified area removed
     """
     return [area for area in areas if area.get(CONF_AREA_ID) != area_id]
+
+
+def _validate_person_input(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Validate and normalize person configuration input.
+
+    Args:
+        user_input: Raw user input from person config form
+
+    Returns:
+        Validated person data dict
+
+    Raises:
+        vol.Invalid: If required fields are missing or empty
+    """
+    person_entity = user_input.get(CONF_PERSON_ENTITY, "")
+    sleep_sensor = user_input.get(CONF_PERSON_SLEEP_SENSOR, "")
+    sleep_area = user_input.get(CONF_PERSON_SLEEP_AREA, "")
+
+    if not person_entity:
+        raise vol.Invalid("person_entity_required")
+    if not sleep_sensor:
+        raise vol.Invalid("sleep_sensor_required")
+    if not sleep_area:
+        raise vol.Invalid("sleep_area_required")
+
+    raw_threshold = user_input.get(
+        CONF_PERSON_CONFIDENCE_THRESHOLD, DEFAULT_SLEEP_CONFIDENCE_THRESHOLD
+    )
+    try:
+        threshold = int(raw_threshold)
+    except (ValueError, TypeError) as err:
+        raise vol.Invalid("confidence_not_number") from err
+    threshold = max(1, min(100, threshold))
+
+    result = {
+        CONF_PERSON_ENTITY: person_entity,
+        CONF_PERSON_SLEEP_SENSOR: sleep_sensor,
+        CONF_PERSON_SLEEP_AREA: sleep_area,
+        CONF_PERSON_CONFIDENCE_THRESHOLD: threshold,
+    }
+
+    device_tracker = user_input.get(CONF_PERSON_DEVICE_TRACKER, "")
+    if device_tracker:
+        result[CONF_PERSON_DEVICE_TRACKER] = device_tracker
+
+    return result
 
 
 def _handle_step_error(err: Exception) -> str:
@@ -1595,6 +1637,25 @@ class BaseOccupancyFlow:
                     "Decay half life must be 0 (use purpose value) or between 10 and 3600 seconds"
                 )
 
+    def _route_area_action(self, action: str, area_id: str) -> None:
+        """Route area action to appropriate step.
+
+        Args:
+            action: Action selected by user
+            area_id: Area ID being acted upon
+        """
+        if action == CONF_ACTION_EDIT:
+            # User wants to edit the area - clear any stale removal state
+            self._area_to_remove = None
+        elif action == CONF_ACTION_REMOVE:
+            # User wants to remove the area
+            self._area_to_remove = area_id
+            self._area_being_edited = None
+        elif action == CONF_ACTION_CANCEL:
+            # User cancelled - clear any stale removal state
+            self._area_to_remove = None
+            self._area_being_edited = None
+
 
 class AreaOccupancyConfigFlow(ConfigFlow, BaseOccupancyFlow, domain=DOMAIN):
     """Handle a config flow for Area Occupancy Detection.
@@ -1834,24 +1895,6 @@ class AreaOccupancyConfigFlow(ConfigFlow, BaseOccupancyFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    def _route_area_action(self, action: str, area_id: str) -> None:
-        """Route area action to appropriate step.
-
-        Args:
-            action: Action selected by user
-            area_id: Area ID being acted upon
-        """
-        if action == CONF_ACTION_EDIT:
-            # User wants to edit the area - no state change needed
-            pass
-        elif action == CONF_ACTION_REMOVE:
-            # User wants to remove the area
-            self._area_to_remove = area_id
-            self._area_being_edited = None
-        elif action == CONF_ACTION_CANCEL:
-            # User cancelled
-            self._area_being_edited = None
-
     async def async_step_area_action(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -1980,6 +2023,7 @@ class AreaOccupancyOptionsFlow(OptionsFlow, BaseOccupancyFlow):
         self._device_id: str | None = (
             None  # Store device_id for device-specific configuration
         )
+        self._person_being_edited: int | None = None  # Index into people list
 
     def _get_areas_from_config(self) -> list[dict[str, Any]]:
         """Get areas list from config entry."""
@@ -2020,6 +2064,7 @@ class AreaOccupancyOptionsFlow(OptionsFlow, BaseOccupancyFlow):
                 CONF_ACTION_GLOBAL_SETTINGS,
                 CONF_ACTION_ADD_AREA,
                 "manage_areas",
+                CONF_ACTION_MANAGE_PEOPLE,
             ],
         )
 
@@ -2082,6 +2127,184 @@ class AreaOccupancyOptionsFlow(OptionsFlow, BaseOccupancyFlow):
             data_schema=_create_global_settings_schema(defaults),
         )
 
+    async def async_step_manage_people(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage configured people for sleep tracking."""
+        errors: dict[str, str] = {}
+        people: list[dict[str, Any]] = list(
+            self.config_entry.options.get(CONF_PEOPLE, [])
+        )
+
+        if user_input is not None:
+            selected = user_input.get("selected_option", "")
+            if selected == "add_person":
+                self._person_being_edited = None
+                return await self.async_step_person_config()
+            if selected.startswith("edit_"):
+                try:
+                    idx = int(selected.replace("edit_", ""))
+                except (ValueError, TypeError):
+                    idx = -1
+                if 0 <= idx < len(people):
+                    self._person_being_edited = idx
+                    return await self.async_step_person_config()
+                errors["base"] = "invalid_selection"
+            elif selected.startswith("remove_"):
+                try:
+                    idx = int(selected.replace("remove_", ""))
+                except (ValueError, TypeError):
+                    idx = -1
+                if 0 <= idx < len(people):
+                    updated_people = [p for i, p in enumerate(people) if i != idx]
+                    config_data = dict(self.config_entry.options)
+                    config_data[CONF_PEOPLE] = updated_people
+                    result = self.async_create_entry(title="", data=config_data)
+                    # Trigger integration reload to update sleep presence sensors
+                    self.hass.async_create_task(
+                        self.hass.config_entries.async_reload(
+                            self.config_entry.entry_id
+                        )
+                    )
+                    return result
+                errors["base"] = "invalid_selection"
+
+        # Build options list
+        options: list[SelectOptionDict] = []
+        for i, person in enumerate(people):
+            person_entity = person.get(CONF_PERSON_ENTITY, "unknown")
+            sleep_area = person.get(CONF_PERSON_SLEEP_AREA, "unknown")
+
+            # Resolve names for display
+            area_name = sleep_area
+            with contextlib.suppress(ValueError):
+                area_name = _resolve_area_id_to_name(self.hass, sleep_area)
+
+            # Get person friendly name from state
+            person_state = self.hass.states.get(person_entity)
+            person_name = (
+                person_state.attributes.get("friendly_name", person_entity)
+                if person_state
+                else person_entity
+            )
+
+            threshold = person.get(
+                CONF_PERSON_CONFIDENCE_THRESHOLD, DEFAULT_SLEEP_CONFIDENCE_THRESHOLD
+            )
+            options.append(
+                {
+                    "value": f"edit_{i}",
+                    "label": f"{person_name} → {area_name} (threshold: {threshold}%)",
+                }
+            )
+            options.append(
+                {
+                    "value": f"remove_{i}",
+                    "label": f"Remove {person_name}",
+                }
+            )
+
+        options.append({"value": "add_person", "label": "Add Person"})
+
+        schema = vol.Schema(
+            {
+                vol.Required("selected_option"): SelectSelector(
+                    SelectSelectorConfig(
+                        options=options,
+                        mode=SelectSelectorMode.LIST,
+                    )
+                )
+            }
+        )
+
+        return self.async_show_form(
+            step_id="manage_people",
+            data_schema=schema,
+            errors=errors,
+        )
+
+    async def async_step_person_config(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure a person for sleep tracking."""
+        errors: dict[str, str] = {}
+        people: list[dict[str, Any]] = list(
+            self.config_entry.options.get(CONF_PEOPLE, [])
+        )
+
+        # Get defaults for editing
+        defaults: dict[str, Any] = {}
+        idx = getattr(self, "_person_being_edited", None)
+        if idx is not None and 0 <= idx < len(people):
+            defaults = dict(people[idx])
+
+        if user_input is not None:
+            try:
+                person_data = _validate_person_input(user_input)
+
+                # Update or add person
+                updated_people = list(people)
+                if idx is not None and 0 <= idx < len(updated_people):
+                    updated_people[idx] = person_data
+                else:
+                    updated_people.append(person_data)
+
+                config_data = dict(self.config_entry.options)
+                config_data[CONF_PEOPLE] = updated_people
+                result = self.async_create_entry(title="", data=config_data)
+                # Trigger integration reload to update sleep presence sensors
+                self.hass.async_create_task(
+                    self.hass.config_entries.async_reload(self.config_entry.entry_id)
+                )
+
+            except (vol.Invalid, ValueError, TypeError) as err:
+                errors["base"] = _handle_step_error(err)
+            else:
+                return result
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_PERSON_ENTITY,
+                    default=defaults.get(CONF_PERSON_ENTITY, ""),
+                ): EntitySelector(EntitySelectorConfig(domain="person")),
+                vol.Required(
+                    CONF_PERSON_SLEEP_SENSOR,
+                    default=defaults.get(CONF_PERSON_SLEEP_SENSOR, ""),
+                ): EntitySelector(EntitySelectorConfig(domain="sensor")),
+                vol.Required(
+                    CONF_PERSON_SLEEP_AREA,
+                    default=defaults.get(CONF_PERSON_SLEEP_AREA, ""),
+                ): AreaSelector(AreaSelectorConfig()),
+                vol.Optional(
+                    CONF_PERSON_CONFIDENCE_THRESHOLD,
+                    default=defaults.get(
+                        CONF_PERSON_CONFIDENCE_THRESHOLD,
+                        DEFAULT_SLEEP_CONFIDENCE_THRESHOLD,
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1,
+                        max=100,
+                        step=5,
+                        mode=NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Optional(
+                    CONF_PERSON_DEVICE_TRACKER,
+                    description={
+                        "suggested_value": defaults.get(CONF_PERSON_DEVICE_TRACKER, "")
+                    },
+                ): EntitySelector(EntitySelectorConfig(domain="device_tracker")),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="person_config",
+            data_schema=schema,
+            errors=errors,
+        )
+
     async def async_step_area_config(
         self,
         user_input: dict[str, Any] | None = None,
@@ -2131,7 +2354,11 @@ class AreaOccupancyOptionsFlow(OptionsFlow, BaseOccupancyFlow):
                 # Preserve existing global options (e.g., sleep schedule)
                 config_data = dict(self.config_entry.options)
                 config_data[CONF_AREAS] = updated_areas
-                return self.async_create_entry(title="", data=config_data)
+                result = self.async_create_entry(title="", data=config_data)
+                # Trigger integration reload to register new entities and devices
+                self.hass.async_create_task(
+                    self.hass.config_entries.async_reload(self.config_entry.entry_id)
+                )
 
             except (
                 HomeAssistantError,
@@ -2141,6 +2368,8 @@ class AreaOccupancyOptionsFlow(OptionsFlow, BaseOccupancyFlow):
                 TypeError,
             ) as err:
                 errors["base"] = _handle_step_error(err)
+            else:
+                return result
 
         # Ensure purpose field has a default
         if CONF_PURPOSE not in defaults:
@@ -2155,24 +2384,6 @@ class AreaOccupancyOptionsFlow(OptionsFlow, BaseOccupancyFlow):
             data_schema=vol.Schema(schema_dict),
             errors=errors,
         )
-
-    def _route_area_action(self, action: str, area_id: str) -> None:
-        """Route area action to appropriate step.
-
-        Args:
-            action: Action selected by user
-            area_id: Area ID being acted upon
-        """
-        if action == CONF_ACTION_EDIT:
-            # User wants to edit the area - no state change needed
-            pass
-        elif action == CONF_ACTION_REMOVE:
-            # User wants to remove the area
-            self._area_to_remove = area_id
-            self._area_being_edited = None
-        elif action == CONF_ACTION_CANCEL:
-            # User cancelled
-            self._area_being_edited = None
 
     async def async_step_area_action(
         self, user_input: dict[str, Any] | None = None
