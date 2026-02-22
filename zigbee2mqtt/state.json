@@ -1,6 +1,6 @@
 {
     "0xffffb40e0603910e": {
-        "vibration": true,
+        "vibration": false,
         "tamper": false,
         "battery_low": false,
         "voltage": 3000,
