@@ -16,7 +16,7 @@
         "pir_detection_interval": 45,
         "absence_delay_timer": 15,
         "power_outage_count": 20,
-        "pir_detection": false,
+        "pir_detection": true,
         "voltage": 3023,
         "battery": 100,
         "detection_range_prefix": 768,

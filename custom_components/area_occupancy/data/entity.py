@@ -37,6 +37,23 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Environmental sensor sub-types share a single configurable weight
+# ("environmental") rather than having individual weight fields. This map
+# translates each sub-type's InputType to the Weights attribute name.
+_WEIGHT_KEY_FOR_INPUT_TYPE: dict[InputType, str] = {
+    InputType.TEMPERATURE: "environmental",
+    InputType.HUMIDITY: "environmental",
+    InputType.ILLUMINANCE: "environmental",
+    InputType.CO2: "environmental",
+    InputType.CO: "environmental",
+    InputType.SOUND_PRESSURE: "environmental",
+    InputType.PRESSURE: "environmental",
+    InputType.AIR_QUALITY: "environmental",
+    InputType.VOC: "environmental",
+    InputType.PM25: "environmental",
+    InputType.PM10: "environmental",
+}
+
 
 @dataclass
 class Entity:
@@ -563,12 +580,16 @@ class Entity:
 
         # Handle entity becoming available (previous was None, now has evidence)
         if previous_evidence is None:
-            # Entity just became available - update previous and don't trigger transition
-            # If it has positive evidence, stop any lingering decay
+            # Entity just became available - stop any lingering decay if active
             if current_evidence:
                 self.decay.stop_decay()
+                self.last_updated = dt_util.utcnow()
             self.previous_evidence = current_evidence
-            return False  # Entity just became available, not a true transition
+            # If entity became available with positive evidence (e.g. unknown→occupied
+            # during startup), we must trigger a refresh so the coordinator recalculates
+            # probability. Without this, sensors that go directly from unknown to active
+            # (common when Z2M loads after AOD) would be silently ignored.
+            return bool(current_evidence)
 
         # Fix inconsistent state: if evidence is True but decay is running, stop decay
         if current_evidence and self.decay.is_decaying:
@@ -679,7 +700,8 @@ class EntityFactory:
 
         weights = getattr(self.config, "weights", None)
         if weights:
-            weight_attr = getattr(weights, input_type.value, None)
+            weight_key = _WEIGHT_KEY_FOR_INPUT_TYPE.get(input_type, input_type.value)
+            weight_attr = getattr(weights, weight_key, None)
             if weight_attr is not None:
                 config_weight = weight_attr
 
@@ -802,7 +824,12 @@ class EntityFactory:
 
         weights = getattr(self.config, "weights", None)
         if weights:
-            weight_attr = getattr(weights, input_type_enum.value, None)
+            # Look up weight by input type, falling back to the shared
+            # "environmental" weight for environmental sensor sub-types
+            weight_key = _WEIGHT_KEY_FOR_INPUT_TYPE.get(
+                input_type_enum, input_type_enum.value
+            )
+            weight_attr = getattr(weights, weight_key, None)
             if weight_attr is not None:
                 weight = weight_attr
 
