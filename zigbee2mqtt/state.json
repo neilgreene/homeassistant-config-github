@@ -114,7 +114,7 @@
         "ai_interference_source_selfidentification": "OFF",
         "ai_sensitivity_adaptive": "ON",
         "illuminance": 38,
-        "humidity": 30,
+        "humidity": 47,
         "temperature": 25.25,
         "temp_&_humidity_sampling": "low",
         "temp_&_humidity_sampling_period": 600,
