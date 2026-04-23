@@ -8,7 +8,14 @@
         "x_axis": 1181,
         "y_axis": 175,
         "z_axis": 572,
-        "linkquality": 172
+        "linkquality": 172,
+        "update": {
+            "state": "idle",
+            "installed_version": 55,
+            "latest_version": 55,
+            "latest_source": "https://raw.githubusercontent.com/Koenkk/zigbee-OTA/master/images/ThirdReality/Vibrate_Sensor_PROD_OTA_V55_v1.00.55.ota",
+            "latest_release_notes": null
+        }
     },
     "0x54ef44100146e0d6": {
         "motion_sensitivity": "medium",
