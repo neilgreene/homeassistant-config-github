@@ -48,6 +48,7 @@ from .const import (
     CONF_ACTION_ADD_AREA,
     CONF_ACTION_GLOBAL_SETTINGS,
     CONF_ACTION_MANAGE_PEOPLE,
+    CONF_ADJACENT_AREAS,
     CONF_AIR_QUALITY_SENSORS,
     CONF_APPLIANCE_ACTIVE_STATES,
     CONF_APPLIANCES,
@@ -62,8 +63,11 @@ from .const import (
     CONF_DOOR_ACTIVE_STATE,
     CONF_DOOR_SENSORS,
     CONF_EXCLUDE_FROM_ALL_AREAS,
+    CONF_HEALTH_ENABLED,
     CONF_HUMIDITY_SENSORS,
     CONF_ILLUMINANCE_SENSORS,
+    CONF_LOCK_ACTIVE_STATE,
+    CONF_LOCK_SENSORS,
     CONF_MEDIA_ACTIVE_STATES,
     CONF_MEDIA_DEVICES,
     CONF_MIN_PRIOR_OVERRIDE,
@@ -84,6 +88,7 @@ from .const import (
     CONF_POWER_SENSORS,
     CONF_PRESSURE_SENSORS,
     CONF_PURPOSE,
+    CONF_SENSOR_PRECISION,
     CONF_SLEEP_END,
     CONF_SLEEP_START,
     CONF_SOUND_PRESSURE_SENSORS,
@@ -100,10 +105,13 @@ from .const import (
     CONF_WEIGHT_COVER,
     CONF_WEIGHT_DOOR,
     CONF_WEIGHT_ENVIRONMENTAL,
+    CONF_WEIGHT_LOCK,
     CONF_WEIGHT_MEDIA,
     CONF_WEIGHT_MOTION,
     CONF_WEIGHT_POWER,
+    CONF_WEIGHT_WIFI_CLIENTS,
     CONF_WEIGHT_WINDOW,
+    CONF_WIFI_CLIENTS_SENSORS,
     CONF_WINDOW_ACTIVE_STATE,
     CONF_WINDOW_SENSORS,
     DEFAULT_APPLIANCE_ACTIVE_STATES,
@@ -112,12 +120,15 @@ from .const import (
     DEFAULT_DECAY_HALF_LIFE,
     DEFAULT_DOOR_ACTIVE_STATE,
     DEFAULT_EXCLUDE_FROM_ALL_AREAS,
+    DEFAULT_HEALTH_ENABLED,
+    DEFAULT_LOCK_ACTIVE_STATE,
     DEFAULT_MEDIA_ACTIVE_STATES,
     DEFAULT_MIN_PRIOR_OVERRIDE,
     DEFAULT_MOTION_PROB_GIVEN_FALSE,
     DEFAULT_MOTION_PROB_GIVEN_TRUE,
     DEFAULT_MOTION_TIMEOUT,
     DEFAULT_PURPOSE,
+    DEFAULT_SENSOR_PRECISION,
     DEFAULT_SLEEP_CONFIDENCE_THRESHOLD,
     DEFAULT_SLEEP_END,
     DEFAULT_SLEEP_START,
@@ -130,9 +141,11 @@ from .const import (
     DEFAULT_WEIGHT_COVER,
     DEFAULT_WEIGHT_DOOR,
     DEFAULT_WEIGHT_ENVIRONMENTAL,
+    DEFAULT_WEIGHT_LOCK,
     DEFAULT_WEIGHT_MEDIA,
     DEFAULT_WEIGHT_MOTION,
     DEFAULT_WEIGHT_POWER,
+    DEFAULT_WEIGHT_WIFI_CLIENTS,
     DEFAULT_WEIGHT_WINDOW,
     DEFAULT_WINDOW_ACTIVE_STATE,
     DOMAIN,
@@ -221,11 +234,7 @@ def _entity_contains_keyword(hass: HomeAssistant, entity_id: str, keyword: str) 
 
     # Check friendly name from state
     state = hass.states.get(entity_id)
-    if state and state.name:
-        if keyword_lower in state.name.lower():
-            return True
-
-    return False
+    return bool(state and state.name and keyword_lower in state.name.lower())
 
 
 def _is_weather_entity(entity_id: str, platform: str | None) -> bool:
@@ -284,6 +293,7 @@ def _get_include_entities(hass: HomeAssistant) -> dict[str, list[str]]:
     include_pm25_entities = []
     include_pm10_entities = []
     include_motion_entities = []
+    include_wifi_clients_entities = []
 
     door_window_classes = (
         BinarySensorDeviceClass.DOOR,
@@ -437,6 +447,13 @@ def _get_include_entities(hass: HomeAssistant) -> dict[str, list[str]]:
             if device_class in pm10_class or original_device_class in pm10_class:
                 include_pm10_entities.append(entry.entity_id)
 
+            # Wi-Fi client-count sensors have no reliable device_class to
+            # filter by, so offer every sensor-domain entity except this
+            # integration's own output sensors (probability, priors, decay,
+            # etc.) — selecting one of those would create a feedback loop.
+            if entry.platform != DOMAIN:
+                include_wifi_clients_entities.append(entry.entity_id)
+
     # Collect all cover entities (blinds, shades, garage doors, shutters, etc.)
     include_cover_entities = [
         entry.entity_id
@@ -444,10 +461,29 @@ def _get_include_entities(hass: HomeAssistant) -> dict[str, list[str]]:
         if entry.entity_id.startswith("cover.") and not entry.disabled
     ]
 
+    # Collect all lock entities (smart locks, e.g. door locks). Locks don't
+    # have meaningfully distinct device_class variants the way binary_sensor
+    # door/window entities do, so just include the whole domain. Discover
+    # via hass.states rather than the entity registry: entities without a
+    # unique_id (some MQTT-configured locks, e.g.) have no registry entry
+    # and would otherwise be silently excluded from selection. The registry
+    # is still consulted, but only to filter out disabled entities.
+    disabled_lock_entities = {
+        entry.entity_id
+        for entry in registry.entities.values()
+        if entry.entity_id.startswith("lock.") and entry.disabled
+    }
+    include_lock_entities = [
+        entity_id
+        for entity_id in hass.states.async_entity_ids("lock")
+        if entity_id not in disabled_lock_entities
+    ]
+
     return {
         "appliance": include_appliance_entities,
         "window": include_window_entities,
         "door": include_door_entities,
+        "lock": include_lock_entities,
         "cover": include_cover_entities,
         "temperature": include_temperature_entities,
         "humidity": include_humidity_entities,
@@ -456,78 +492,8 @@ def _get_include_entities(hass: HomeAssistant) -> dict[str, list[str]]:
         "pm25": include_pm25_entities,
         "pm10": include_pm10_entities,
         "motion": include_motion_entities,
+        "wifi_clients": include_wifi_clients_entities,
     }
-
-
-def _create_motion_section_schema(
-    defaults: dict[str, Any],
-    motion_entities: list[str],
-    *,
-    show_advanced: bool = False,
-) -> vol.Schema:
-    """Create schema for the motion section."""
-    fields: dict[vol.Marker, Any] = {
-        vol.Required(
-            CONF_MOTION_SENSORS, default=defaults.get(CONF_MOTION_SENSORS, [])
-        ): EntitySelector(
-            EntitySelectorConfig(
-                include_entities=motion_entities,
-                multiple=True,
-            )
-        ),
-        vol.Optional(
-            CONF_WEIGHT_MOTION,
-            default=defaults.get(CONF_WEIGHT_MOTION, DEFAULT_WEIGHT_MOTION),
-        ): NumberSelector(
-            NumberSelectorConfig(
-                min=WEIGHT_MIN,
-                max=WEIGHT_MAX,
-                step=WEIGHT_STEP,
-                mode=NumberSelectorMode.SLIDER,
-                unit_of_measurement="weight",
-            )
-        ),
-        vol.Optional(
-            CONF_MOTION_TIMEOUT,
-            default=_seconds_to_duration(
-                defaults.get(CONF_MOTION_TIMEOUT, DEFAULT_MOTION_TIMEOUT)
-            ),
-        ): DurationSelector(DurationSelectorConfig(enable_day=False)),
-    }
-
-    if show_advanced:
-        fields[
-            vol.Optional(
-                CONF_MOTION_PROB_GIVEN_TRUE,
-                default=defaults.get(
-                    CONF_MOTION_PROB_GIVEN_TRUE, DEFAULT_MOTION_PROB_GIVEN_TRUE
-                ),
-            )
-        ] = NumberSelector(
-            NumberSelectorConfig(
-                min=MIN_PROBABILITY,
-                max=MAX_PROBABILITY,
-                step=0.01,
-                mode=NumberSelectorMode.BOX,
-            )
-        )
-        fields[
-            vol.Optional(
-                CONF_MOTION_PROB_GIVEN_FALSE,
-                default=defaults.get(
-                    CONF_MOTION_PROB_GIVEN_FALSE, DEFAULT_MOTION_PROB_GIVEN_FALSE
-                ),
-            )
-        ] = NumberSelector(
-            NumberSelectorConfig(
-                min=0.001,
-                max=MAX_PROBABILITY,
-                step=0.001,
-                mode=NumberSelectorMode.BOX,
-            )
-        )
-
-    return vol.Schema(fields)
 
 
 def _create_windows_and_doors_section_schema(
@@ -535,11 +501,13 @@ def _create_windows_and_doors_section_schema(
     door_entities: list[str],
     window_entities: list[str],
     cover_entities: list[str],
+    lock_entities: list[str],
     door_state_options: list[SelectOptionDict],
     window_state_options: list[SelectOptionDict],
     cover_state_options: list[SelectOptionDict],
+    lock_state_options: list[SelectOptionDict],
 ) -> vol.Schema:
-    """Create schema for the combined windows, doors, and covers section."""
+    """Create schema for the combined windows, doors, locks, and covers section."""
     return vol.Schema(
         {
             vol.Optional(
@@ -560,6 +528,32 @@ def _create_windows_and_doors_section_schema(
             vol.Optional(
                 CONF_WEIGHT_DOOR,
                 default=defaults.get(CONF_WEIGHT_DOOR, DEFAULT_WEIGHT_DOOR),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=WEIGHT_MIN,
+                    max=WEIGHT_MAX,
+                    step=WEIGHT_STEP,
+                    mode=NumberSelectorMode.SLIDER,
+                )
+            ),
+            vol.Optional(
+                CONF_LOCK_SENSORS, default=defaults.get(CONF_LOCK_SENSORS, [])
+            ): EntitySelector(
+                EntitySelectorConfig(include_entities=lock_entities, multiple=True)
+            ),
+            vol.Optional(
+                CONF_LOCK_ACTIVE_STATE,
+                default=defaults.get(CONF_LOCK_ACTIVE_STATE, get_default_state("lock")),
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=lock_state_options,
+                    mode=SelectSelectorMode.DROPDOWN,
+                    custom_value=True,
+                )
+            ),
+            vol.Optional(
+                CONF_WEIGHT_LOCK,
+                default=defaults.get(CONF_WEIGHT_LOCK, DEFAULT_WEIGHT_LOCK),
             ): NumberSelector(
                 NumberSelectorConfig(
                     min=WEIGHT_MIN,
@@ -876,59 +870,43 @@ def _create_power_section_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
-def _create_parameters_section_schema(
-    defaults: dict[str, Any],
-    *,
-    show_advanced: bool = False,
+def _create_wifi_clients_section_schema(
+    defaults: dict[str, Any], wifi_clients_entities: list[str]
 ) -> vol.Schema:
-    """Create schema for the parameters section."""
-    # Default decay half-life to 0 (use purpose value)
-    decay_half_life_default = defaults.get(
-        CONF_DECAY_HALF_LIFE, DEFAULT_DECAY_HALF_LIFE
-    )
+    """Create schema for the Wi-Fi client-count section.
 
-    fields: dict[vol.Marker, Any] = {
-        vol.Optional(
-            CONF_THRESHOLD, default=defaults.get(CONF_THRESHOLD, DEFAULT_THRESHOLD)
-        ): NumberSelector(
-            NumberSelectorConfig(
-                min=THRESHOLD_MIN,
-                max=THRESHOLD_MAX,
-                step=THRESHOLD_STEP,
-                mode=NumberSelectorMode.SLIDER,
-            )
-        ),
-        vol.Optional(
-            CONF_DECAY_ENABLED,
-            default=defaults.get(CONF_DECAY_ENABLED, DEFAULT_DECAY_ENABLED),
-        ): BooleanSelector(),
-    }
-
-    if show_advanced:
-        fields[
+    Unlike power sensors, Wi-Fi client-count sensors (e.g. from the UniFi
+    Network integration) have no reliable SensorDeviceClass to auto-filter
+    by, so this offers every sensor-domain entity except this integration's
+    own output sensors (see ``_get_include_entities``'s ``wifi_clients`` key)
+    rather than a device_class-scanned include list.
+    """
+    return vol.Schema(
+        {
             vol.Optional(
-                CONF_DECAY_HALF_LIFE,
-                default=_seconds_to_duration(decay_half_life_default),
-            )
-        ] = DurationSelector(DurationSelectorConfig(enable_day=False))
-        fields[
+                CONF_WIFI_CLIENTS_SENSORS,
+                default=defaults.get(CONF_WIFI_CLIENTS_SENSORS, []),
+            ): EntitySelector(
+                EntitySelectorConfig(
+                    include_entities=wifi_clients_entities,
+                    multiple=True,
+                )
+            ),
             vol.Optional(
-                CONF_MIN_PRIOR_OVERRIDE,
+                CONF_WEIGHT_WIFI_CLIENTS,
                 default=defaults.get(
-                    CONF_MIN_PRIOR_OVERRIDE, DEFAULT_MIN_PRIOR_OVERRIDE
+                    CONF_WEIGHT_WIFI_CLIENTS, DEFAULT_WEIGHT_WIFI_CLIENTS
                 ),
-            )
-        ] = NumberSelector(
-            NumberSelectorConfig(
-                min=0.0,
-                max=1.0,
-                step=0.01,
-                mode=NumberSelectorMode.SLIDER,
-                unit_of_measurement="probability",
-            )
-        )
-
-    return vol.Schema(fields)
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=WEIGHT_MIN,
+                    max=WEIGHT_MAX,
+                    step=WEIGHT_STEP,
+                    mode=NumberSelectorMode.SLIDER,
+                )
+            ),
+        }
+    )
 
 
 def _create_wasp_in_box_section_schema(defaults: dict[str, Any]) -> vol.Schema:
@@ -974,124 +952,20 @@ def _create_wasp_in_box_section_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
-def create_schema(
-    hass: HomeAssistant,
-    defaults: dict[str, Any] | None = None,
-    is_options: bool = False,
-    include_entities: dict[str, list[str]] | None = None,
+def _create_basics_step_schema(
     *,
-    show_advanced: bool = False,
-) -> dict:
-    """Create a schema with optional default values, using helper functions.
+    is_editing: bool = False,
+    adjacent_options: list[SelectOptionDict] | None = None,
+) -> dict[vol.Marker, Any]:
+    """Create schema for wizard step 1: area selection and purpose.
 
     Args:
-        hass: Home Assistant instance
-        defaults: Optional default values for form fields
-        is_options: Whether this is for options flow (vs initial config flow)
-        include_entities: Optional pre-computed entity lists. If not provided,
-            will be computed from hass.
-        show_advanced: Whether to show advanced options (motion probs, decay half-life, min prior)
-
-    Returns:
-        Schema dictionary for form
+        is_editing: True if editing an existing area (skips area selector).
+        adjacent_options: Other areas in this entry available as adjacency
+            choices. Each option is `{"value": area_id, "label": area_name}`.
+            When None or empty, the adjacency field is omitted (e.g. the
+            first area being added has no neighbours to pick from).
     """
-    # Ensure defaults is a dictionary
-    defaults = defaults if defaults is not None else {}
-
-    # Pre-calculate expensive lookups (or use provided)
-    if include_entities is None:
-        include_entities = _get_include_entities(hass)
-    door_state_options = _get_state_select_options("door")
-    media_state_options = _get_state_select_options("media")
-    window_state_options = _get_state_select_options("window")
-    cover_state_options = _get_state_select_options("cover")
-    appliance_state_options = _get_state_select_options("appliance")
-
-    # Initialize the dictionary for the schema
-    schema_dict: dict[vol.Marker, Any] = {}
-
-    # Get default area ID from defaults (for editing existing areas)
-    default_area_id = defaults.get(CONF_AREA_ID, "")
-
-    # Add area selector (same for both initial and options flow)
-    schema_dict[vol.Required(CONF_AREA_ID, default=default_area_id)] = AreaSelector(
-        AreaSelectorConfig()
-    )
-    # Add purpose field at root level (not in a section)
-    schema_dict[
-        vol.Optional(CONF_PURPOSE, default=defaults.get(CONF_PURPOSE, DEFAULT_PURPOSE))
-    ] = SelectSelector(
-        SelectSelectorConfig(
-            options=cast("list[SelectOptionDict]", get_purpose_options()),
-            mode=SelectSelectorMode.DROPDOWN,
-        )
-    )
-
-    # Add sections by assigning keys directly to the dictionary
-    schema_dict[vol.Required("motion")] = section(
-        _create_motion_section_schema(
-            defaults, include_entities["motion"], show_advanced=show_advanced
-        ),
-        {"collapsed": True},
-    )
-    schema_dict[vol.Required("windows_and_doors")] = section(
-        _create_windows_and_doors_section_schema(
-            defaults,
-            include_entities["door"],
-            include_entities["window"],
-            include_entities["cover"],
-            cast("list[SelectOptionDict]", door_state_options),
-            cast("list[SelectOptionDict]", window_state_options),
-            cast("list[SelectOptionDict]", cover_state_options),
-        ),
-        {"collapsed": True},
-    )
-    schema_dict[vol.Required("media")] = section(
-        _create_media_section_schema(
-            defaults, cast("list[SelectOptionDict]", media_state_options)
-        ),
-        {"collapsed": True},
-    )
-    schema_dict[vol.Required("appliances")] = section(
-        _create_appliances_section_schema(
-            defaults,
-            include_entities["appliance"],
-            cast("list[SelectOptionDict]", appliance_state_options),
-        ),
-        {"collapsed": True},
-    )
-    schema_dict[vol.Required("environmental")] = section(
-        _create_environmental_section_schema(
-            defaults,
-            include_entities["temperature"],
-            include_entities["humidity"],
-            include_entities["pressure"],
-            include_entities["air_quality"],
-            include_entities["pm25"],
-            include_entities["pm10"],
-        ),
-        {"collapsed": True},
-    )
-    schema_dict[vol.Required("power")] = section(
-        _create_power_section_schema(defaults), {"collapsed": True}
-    )
-    schema_dict[vol.Required("wasp_in_box")] = section(
-        _create_wasp_in_box_section_schema(defaults), {"collapsed": True}
-    )
-    schema_dict[vol.Required("parameters")] = section(
-        _create_parameters_section_schema(defaults, show_advanced=show_advanced),
-        {"collapsed": True},
-    )
-
-    # Pass the correctly structured dictionary to vol.Schema
-    return schema_dict
-
-
-# ── Wizard step schemas ──────────────────────────────────────────────
-
-
-def _create_basics_step_schema(*, is_editing: bool = False) -> dict[vol.Marker, Any]:
-    """Create schema for wizard step 1: area selection and purpose."""
     fields: dict[vol.Marker, Any] = {}
     if not is_editing:
         fields[vol.Required(CONF_AREA_ID)] = AreaSelector()
@@ -1101,14 +975,20 @@ def _create_basics_step_schema(*, is_editing: bool = False) -> dict[vol.Marker, 
             mode=SelectSelectorMode.DROPDOWN,
         )
     )
+    if adjacent_options:
+        fields[vol.Optional(CONF_ADJACENT_AREAS, default=[])] = SelectSelector(
+            SelectSelectorConfig(
+                options=adjacent_options,
+                multiple=True,
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        )
     return fields
 
 
 def _create_motion_step_schema(
     hass: HomeAssistant,
     include_entities: dict[str, list[str]] | None = None,
-    *,
-    show_advanced: bool = False,
 ) -> dict[vol.Marker, Any]:
     """Create schema for wizard step 2: motion sensor configuration."""
     if include_entities is None:
@@ -1134,35 +1014,29 @@ def _create_motion_step_schema(
             CONF_MOTION_TIMEOUT,
             default=_seconds_to_duration(DEFAULT_MOTION_TIMEOUT),
         ): DurationSelector(DurationSelectorConfig(enable_day=False)),
-    }
-
-    if show_advanced:
-        fields[
-            vol.Optional(
-                CONF_MOTION_PROB_GIVEN_TRUE,
-                default=DEFAULT_MOTION_PROB_GIVEN_TRUE,
-            )
-        ] = NumberSelector(
+        vol.Optional(
+            CONF_MOTION_PROB_GIVEN_TRUE,
+            default=DEFAULT_MOTION_PROB_GIVEN_TRUE,
+        ): NumberSelector(
             NumberSelectorConfig(
                 min=MIN_PROBABILITY,
                 max=MAX_PROBABILITY,
                 step=0.01,
                 mode=NumberSelectorMode.BOX,
             )
-        )
-        fields[
-            vol.Optional(
-                CONF_MOTION_PROB_GIVEN_FALSE,
-                default=DEFAULT_MOTION_PROB_GIVEN_FALSE,
-            )
-        ] = NumberSelector(
+        ),
+        vol.Optional(
+            CONF_MOTION_PROB_GIVEN_FALSE,
+            default=DEFAULT_MOTION_PROB_GIVEN_FALSE,
+        ): NumberSelector(
             NumberSelectorConfig(
                 min=0.001,
                 max=MAX_PROBABILITY,
                 step=0.001,
                 mode=NumberSelectorMode.BOX,
             )
-        )
+        ),
+    }
 
     return fields
 
@@ -1177,6 +1051,7 @@ def _create_sensors_step_schema(
 
     defaults: dict[str, Any] = {}
     door_state_options = _get_state_select_options("door")
+    lock_state_options = _get_state_select_options("lock")
     media_state_options = _get_state_select_options("media")
     window_state_options = _get_state_select_options("window")
     cover_state_options = _get_state_select_options("cover")
@@ -1189,9 +1064,11 @@ def _create_sensors_step_schema(
                 include_entities["door"],
                 include_entities["window"],
                 include_entities["cover"],
+                include_entities["lock"],
                 cast("list[SelectOptionDict]", door_state_options),
                 cast("list[SelectOptionDict]", window_state_options),
                 cast("list[SelectOptionDict]", cover_state_options),
+                cast("list[SelectOptionDict]", lock_state_options),
             ),
             {"collapsed": True},
         ),
@@ -1224,13 +1101,17 @@ def _create_sensors_step_schema(
         vol.Required("power"): section(
             _create_power_section_schema(defaults), {"collapsed": True}
         ),
+        vol.Required("wifi_clients"): section(
+            _create_wifi_clients_section_schema(
+                defaults, include_entities["wifi_clients"]
+            ),
+            {"collapsed": True},
+        ),
     }
 
 
 def _create_behavior_step_schema(
     defaults: dict[str, Any] | None = None,
-    *,
-    show_advanced: bool = False,
 ) -> dict[vol.Marker, Any]:
     """Create schema for wizard step 4: thresholds, decay, and wasp-in-box."""
     defaults = defaults or {}
@@ -1250,21 +1131,14 @@ def _create_behavior_step_schema(
         vol.Optional(
             CONF_EXCLUDE_FROM_ALL_AREAS, default=DEFAULT_EXCLUDE_FROM_ALL_AREAS
         ): BooleanSelector(),
-    }
-
-    if show_advanced:
-        fields[
-            vol.Optional(
-                CONF_DECAY_HALF_LIFE,
-                default=_seconds_to_duration(DEFAULT_DECAY_HALF_LIFE),
-            )
-        ] = DurationSelector(DurationSelectorConfig(enable_day=False))
-        fields[
-            vol.Optional(
-                CONF_MIN_PRIOR_OVERRIDE,
-                default=DEFAULT_MIN_PRIOR_OVERRIDE,
-            )
-        ] = NumberSelector(
+        vol.Optional(
+            CONF_DECAY_HALF_LIFE,
+            default=_seconds_to_duration(DEFAULT_DECAY_HALF_LIFE),
+        ): DurationSelector(DurationSelectorConfig(enable_day=False)),
+        vol.Optional(
+            CONF_MIN_PRIOR_OVERRIDE,
+            default=DEFAULT_MIN_PRIOR_OVERRIDE,
+        ): NumberSelector(
             NumberSelectorConfig(
                 min=0.0,
                 max=1.0,
@@ -1272,13 +1146,12 @@ def _create_behavior_step_schema(
                 mode=NumberSelectorMode.SLIDER,
                 unit_of_measurement="probability",
             )
-        )
-
-    # Wasp-in-box fields in collapsible section
-    fields[vol.Required("wasp_in_box")] = section(
-        _create_wasp_in_box_section_schema(defaults),
-        {"collapsed": True},
-    )
+        ),
+        vol.Required("wasp_in_box"): section(
+            _create_wasp_in_box_section_schema(defaults),
+            {"collapsed": True},
+        ),
+    }
 
     return fields
 
@@ -1324,6 +1197,9 @@ def _nest_config_for_sections(flat_config: dict[str, Any]) -> dict[str, Any]:  #
         CONF_DOOR_SENSORS,
         CONF_DOOR_ACTIVE_STATE,
         CONF_WEIGHT_DOOR,
+        CONF_LOCK_SENSORS,
+        CONF_LOCK_ACTIVE_STATE,
+        CONF_WEIGHT_LOCK,
         CONF_WINDOW_SENSORS,
         CONF_WINDOW_ACTIVE_STATE,
         CONF_WEIGHT_WINDOW,
@@ -1380,6 +1256,14 @@ def _nest_config_for_sections(flat_config: dict[str, Any]) -> dict[str, Any]:  #
             power[key] = flat_config[key]
     if power:
         nested["power"] = power
+
+    # Wi-Fi clients section
+    wifi_clients: dict[str, Any] = {}
+    for key in (CONF_WIFI_CLIENTS_SENSORS, CONF_WEIGHT_WIFI_CLIENTS):
+        if key in flat_config:
+            wifi_clients[key] = flat_config[key]
+    if wifi_clients:
+        nested["wifi_clients"] = wifi_clients
 
     # Wasp in box section
     wasp: dict[str, Any] = {}
@@ -1523,6 +1407,7 @@ def _build_area_description_placeholders(
         "motion_count": str(len(area_config.get(CONF_MOTION_SENSORS, []))),
         "media_count": str(len(area_config.get(CONF_MEDIA_DEVICES, []))),
         "door_count": str(len(area_config.get(CONF_DOOR_SENSORS, []))),
+        "lock_count": str(len(area_config.get(CONF_LOCK_SENSORS, []))),
         "window_count": str(len(area_config.get(CONF_WINDOW_SENSORS, []))),
         "appliance_count": str(len(area_config.get(CONF_APPLIANCES, []))),
         "threshold": str(area_config.get(CONF_THRESHOLD, DEFAULT_THRESHOLD)),
@@ -1545,10 +1430,16 @@ def _get_area_summary_info(area: dict[str, Any]) -> str:
     motion_count = len(area.get(CONF_MOTION_SENSORS, []))
     media_count = len(area.get(CONF_MEDIA_DEVICES, []))
     door_count = len(area.get(CONF_DOOR_SENSORS, []))
+    lock_count = len(area.get(CONF_LOCK_SENSORS, []))
     window_count = len(area.get(CONF_WINDOW_SENSORS, []))
     appliance_count = len(area.get(CONF_APPLIANCES, []))
     total_sensors = (
-        motion_count + media_count + door_count + window_count + appliance_count
+        motion_count
+        + media_count
+        + door_count
+        + lock_count
+        + window_count
+        + appliance_count
     )
 
     threshold = area.get(CONF_THRESHOLD, DEFAULT_THRESHOLD)
@@ -1627,12 +1518,128 @@ def _find_area_by_id(
     return None
 
 
+def _normalize_adjacent_areas(value: Any) -> list[str]:
+    """Coerce a `CONF_ADJACENT_AREAS` value to a clean list of area_id strings.
+
+    The persistence layer normally writes a list, but config storage is JSON
+    and a hand-edited file (or an old import) can supply other shapes. The
+    mirror/strip helpers do set ops over the values, so a stray string would
+    be iterated character-by-character and silently corrupt the data. This
+    helper folds every shape into a `list[str]`:
+
+    - ``None`` → ``[]``
+    - empty string → ``[]``
+    - non-empty string → ``[value]`` (treated as a single area_id, not a
+      sequence of characters)
+    - list / tuple / set → list of non-empty stringified items (drops falsy
+      entries like ``""`` or ``None``)
+    - anything else → ``[str(value)]`` (best-effort preservation; the helper
+      never raises, so an unexpected scalar is kept as a single id rather
+      than silently dropped)
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        # A bare string is a single area_id, not a sequence to iterate.
+        return [value] if value else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(v) for v in value if v]
+    # Best-effort: keep the value as a single entry rather than crashing.
+    return [str(value)]
+
+
+def _apply_symmetric_adjacency(
+    areas: list[dict[str, Any]], updated_area: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Mirror an area's adjacency edits across the paired areas.
+
+    The adjacency UI is per-area (a flat multi-select of neighbours), but
+    the underlying relation is mutual. When the user saves area A with
+    adjacents `[B, C]`:
+      * Add A to B's and C's adjacents (if not already there).
+      * Remove A from any other area X that previously listed A but
+        isn't in A's new list.
+
+    Returns a new list — does not mutate inputs.
+    """
+    target_area_id = updated_area.get(CONF_AREA_ID)
+    if not target_area_id:
+        return areas
+
+    target_adjacents = set(
+        _normalize_adjacent_areas(updated_area.get(CONF_ADJACENT_AREAS))
+    )
+    # Defensive: the UI excludes self from the multi-select, but a
+    # hand-edited storage file or imported config could carry a stray
+    # self-reference. Drop it before any set ops so downstream callers
+    # never see an area listed as adjacent to itself.
+    target_adjacents.discard(target_area_id)
+
+    result: list[dict[str, Any]] = []
+    sanitized_target_adjacents = sorted(target_adjacents)
+    for area in areas:
+        area_id = area.get(CONF_AREA_ID)
+        # The target row was substituted in by the caller; rewrite its
+        # adjacents field to the normalised+self-stripped value so any
+        # malformed input (non-list, self-link) doesn't survive a save.
+        if area_id == target_area_id:
+            cleaned_target = dict(area)
+            cleaned_target[CONF_ADJACENT_AREAS] = list(sanitized_target_adjacents)
+            result.append(cleaned_target)
+            continue
+        if not area_id:
+            result.append(area)
+            continue
+
+        current_adjacents = set(
+            _normalize_adjacent_areas(area.get(CONF_ADJACENT_AREAS))
+        )
+        # Same defensive guard for the partner row.
+        current_adjacents.discard(area_id)
+
+        if area_id in target_adjacents:
+            new_adjacents = current_adjacents | {target_area_id}
+        else:
+            new_adjacents = current_adjacents - {target_area_id}
+
+        if new_adjacents != current_adjacents:
+            mirrored = dict(area)
+            mirrored[CONF_ADJACENT_AREAS] = sorted(new_adjacents)
+            result.append(mirrored)
+        else:
+            result.append(area)
+    return result
+
+
+def _strip_adjacency_references(
+    areas: list[dict[str, Any]], removed_area_id: str
+) -> list[dict[str, Any]]:
+    """Remove a deleted area_id from every other area's adjacents list."""
+    if not removed_area_id:
+        return areas
+    result: list[dict[str, Any]] = []
+    for area in areas:
+        normalized = _normalize_adjacent_areas(area.get(CONF_ADJACENT_AREAS))
+        if removed_area_id in normalized:
+            cleaned = dict(area)
+            cleaned[CONF_ADJACENT_AREAS] = [
+                a for a in normalized if a != removed_area_id
+            ]
+            result.append(cleaned)
+        else:
+            result.append(area)
+    return result
+
+
 def _update_area_in_list(
     areas: list[dict[str, Any]],
     updated_area: dict[str, Any],
     area_id: str | None,
 ) -> list[dict[str, Any]]:
     """Update or add an area in a list of areas.
+
+    After the update or add, mirrors any adjacency changes across the
+    other areas (adjacency is mutual; the UI is per-area).
 
     Args:
         areas: List of area configuration dictionaries
@@ -1657,13 +1664,16 @@ def _update_area_in_list(
         # Add new area
         updated_areas.append(updated_area)
 
-    return updated_areas
+    return _apply_symmetric_adjacency(updated_areas, updated_area)
 
 
 def _remove_area_from_list(
     areas: list[dict[str, Any]], area_id: str
 ) -> list[dict[str, Any]]:
     """Remove an area from a list of areas.
+
+    Also strips the removed area_id from every surviving area's
+    adjacents list so we don't leave dangling references.
 
     Args:
         areas: List of area configuration dictionaries
@@ -1672,7 +1682,8 @@ def _remove_area_from_list(
     Returns:
         Updated list of areas with specified area removed
     """
-    return [area for area in areas if area.get(CONF_AREA_ID) != area_id]
+    surviving = [area for area in areas if area.get(CONF_AREA_ID) != area_id]
+    return _strip_adjacency_references(surviving, area_id)
 
 
 def _validate_person_input(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -1824,6 +1835,24 @@ def _create_global_settings_schema(defaults: dict[str, Any]) -> vol.Schema:
                 CONF_SLEEP_END,
                 default=defaults.get(CONF_SLEEP_END, DEFAULT_SLEEP_END),
             ): TimeSelector(),
+            vol.Required(
+                CONF_HEALTH_ENABLED,
+                default=defaults.get(CONF_HEALTH_ENABLED, DEFAULT_HEALTH_ENABLED),
+            ): BooleanSelector(),
+            vol.Required(
+                CONF_SENSOR_PRECISION,
+                default=defaults.get(CONF_SENSOR_PRECISION, DEFAULT_SENSOR_PRECISION),
+            ): vol.All(
+                NumberSelector(
+                    NumberSelectorConfig(
+                        min=0,
+                        max=2,
+                        step=1,
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Coerce(int),
+            ),
         }
     )
 
@@ -1943,6 +1972,12 @@ class BaseOccupancyFlow:
         if door_sensors and not door_state:
             errors[CONF_DOOR_SENSORS] = "door_state_required"
 
+        # Validate locks
+        lock_sensors = data.get(CONF_LOCK_SENSORS, [])
+        lock_state = data.get(CONF_LOCK_ACTIVE_STATE, DEFAULT_LOCK_ACTIVE_STATE)
+        if lock_sensors and not lock_state:
+            errors[CONF_LOCK_SENSORS] = "lock_state_required"
+
         # Validate windows
         window_sensors = data.get(CONF_WINDOW_SENSORS, [])
         window_state = data.get(CONF_WINDOW_ACTIVE_STATE, DEFAULT_WINDOW_ACTIVE_STATE)
@@ -1964,6 +1999,7 @@ class BaseOccupancyFlow:
                 data.get(CONF_WEIGHT_APPLIANCE, DEFAULT_WEIGHT_APPLIANCE),
             ),
             (CONF_WEIGHT_DOOR, data.get(CONF_WEIGHT_DOOR, DEFAULT_WEIGHT_DOOR)),
+            (CONF_WEIGHT_LOCK, data.get(CONF_WEIGHT_LOCK, DEFAULT_WEIGHT_LOCK)),
             (CONF_WEIGHT_WINDOW, data.get(CONF_WEIGHT_WINDOW, DEFAULT_WEIGHT_WINDOW)),
             (CONF_WEIGHT_COVER, data.get(CONF_WEIGHT_COVER, DEFAULT_WEIGHT_COVER)),
             (
@@ -1973,6 +2009,10 @@ class BaseOccupancyFlow:
             (
                 CONF_WEIGHT_POWER,
                 data.get(CONF_WEIGHT_POWER, DEFAULT_WEIGHT_POWER),
+            ),
+            (
+                CONF_WEIGHT_WIFI_CLIENTS,
+                data.get(CONF_WEIGHT_WIFI_CLIENTS, DEFAULT_WEIGHT_WIFI_CLIENTS),
             ),
         ]
         for name, weight in weights:
@@ -2018,6 +2058,36 @@ class BaseOccupancyFlow:
     ) -> ConfigFlowResult:
         """Handle completion of the area config wizard. Overridden by subclasses."""
         raise NotImplementedError
+
+    def _build_adjacent_area_options(self) -> list[SelectOptionDict]:
+        """Build the multi-select options for the adjacency field.
+
+        Returns options for every area configured in this entry except the
+        one currently being edited (you can't be adjacent to yourself).
+        Labels resolve to the HA area registry name when possible, falling
+        back to the raw area_id.
+        """
+        options: list[SelectOptionDict] = []
+        seen: set[str] = set()
+        editing_area_id = self._area_being_edited
+        for area in self._get_wizard_areas():
+            other_area_id = area.get(CONF_AREA_ID)
+            # Defensive: malformed persisted data could leave a non-string
+            # value here. Comparison still works but downstream
+            # ``_resolve_area_id_to_name`` and ``SelectOptionDict`` both
+            # expect str — skip rather than crash later.
+            if not isinstance(other_area_id, str) or not other_area_id:
+                continue
+            if other_area_id == editing_area_id or other_area_id in seen:
+                continue
+            seen.add(other_area_id)
+            label = other_area_id
+            if self.hass:
+                with contextlib.suppress(ValueError):
+                    label = _resolve_area_id_to_name(self.hass, other_area_id)
+            options.append(SelectOptionDict(value=other_area_id, label=label))
+        options.sort(key=lambda opt: opt["label"].lower())
+        return options
 
     def _init_area_wizard(self) -> None:
         """Initialize the area config wizard draft."""
@@ -2071,8 +2141,10 @@ class BaseOccupancyFlow:
                 self._area_config_draft.update(user_input)
                 return await self.async_step_area_motion()
 
+        adjacent_options = self._build_adjacent_area_options()
         schema_dict = _create_basics_step_schema(
-            is_editing=self._area_being_edited is not None
+            is_editing=self._area_being_edited is not None,
+            adjacent_options=adjacent_options,
         )
         base_schema = vol.Schema(schema_dict)
 
@@ -2081,7 +2153,8 @@ class BaseOccupancyFlow:
             user_input
             if user_input is not None
             else _draft_to_suggested(
-                self._area_config_draft, {CONF_AREA_ID, CONF_PURPOSE}
+                self._area_config_draft,
+                {CONF_AREA_ID, CONF_PURPOSE, CONF_ADJACENT_AREAS},
             )
         )
         if suggested:
@@ -2133,9 +2206,7 @@ class BaseOccupancyFlow:
                 self._area_config_draft.update(flattened)
                 return await self.async_step_area_sensors()
 
-        schema_dict = _create_motion_step_schema(
-            self.hass, show_advanced=self.show_advanced_options
-        )
+        schema_dict = _create_motion_step_schema(self.hass)
         base_schema = vol.Schema(schema_dict)
 
         # Suggested values
@@ -2187,6 +2258,10 @@ class BaseOccupancyFlow:
                 CONF_DOOR_ACTIVE_STATE, DEFAULT_DOOR_ACTIVE_STATE
             ):
                 errors["base"] = "door_state_required"
+            if flattened.get(CONF_LOCK_SENSORS, []) and not flattened.get(
+                CONF_LOCK_ACTIVE_STATE, DEFAULT_LOCK_ACTIVE_STATE
+            ):
+                errors["base"] = "lock_state_required"
             if flattened.get(CONF_WINDOW_SENSORS, []) and not flattened.get(
                 CONF_WINDOW_ACTIVE_STATE, DEFAULT_WINDOW_ACTIVE_STATE
             ):
@@ -2214,6 +2289,7 @@ class BaseOccupancyFlow:
                 "appliances",
                 "environmental",
                 "power",
+                "wifi_clients",
             }
             suggested = {k: v for k, v in nested.items() if k in sensor_sections}
             if suggested:
@@ -2258,10 +2334,7 @@ class BaseOccupancyFlow:
 
             errors.update(validation_errors)
 
-        schema_dict = _create_behavior_step_schema(
-            self._area_config_draft,
-            show_advanced=self.show_advanced_options,
-        )
+        schema_dict = _create_behavior_step_schema(self._area_config_draft)
         base_schema = vol.Schema(schema_dict)
 
         # Suggested values - top-level behavior + nested wasp section
@@ -2567,6 +2640,7 @@ class AreaOccupancyOptionsFlow(OptionsFlow, BaseOccupancyFlow):
         super().__init__()
         self._area_being_edited: str | None = None
         self._area_to_remove: str | None = None
+        self._area_to_reset: str | None = None  # area_id pending learning reset
         self._area_config_draft: dict[str, Any] = {}
         self._person_being_edited: int | None = None  # Index into people list
         self._person_to_remove: int | None = None  # Index into people list for removal
@@ -2683,7 +2757,12 @@ class AreaOccupancyOptionsFlow(OptionsFlow, BaseOccupancyFlow):
 
         return self.async_show_menu(
             step_id="area_action",
-            menu_options=["edit_area", "remove_area_confirm", "cancel_area_action"],
+            menu_options=[
+                "edit_area",
+                "reset_learning_confirm",
+                "remove_area_confirm",
+                "cancel_area_action",
+            ],
             description_placeholders=description_placeholders,
         )
 
@@ -2701,6 +2780,13 @@ class AreaOccupancyOptionsFlow(OptionsFlow, BaseOccupancyFlow):
         """Initiate area removal."""
         self._prepare_area_action_remove()
         return await self.async_step_remove_area()
+
+    async def async_step_reset_learning_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Initiate learning reset for the area being edited."""
+        self._area_to_reset = self._area_being_edited
+        return await self.async_step_reset_learning()
 
     async def async_step_cancel_area_action(
         self, user_input: dict[str, Any] | None = None
@@ -2747,11 +2833,95 @@ class AreaOccupancyOptionsFlow(OptionsFlow, BaseOccupancyFlow):
         self._area_to_remove = None
         return await self.async_step_init()
 
+    async def async_step_reset_learning(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Yes/no menu confirming learning reset for the selected area."""
+        if not self._area_to_reset:
+            return await self.async_step_init()
+
+        return self.async_show_menu(
+            step_id="reset_learning",
+            menu_options=["confirm_reset_learning", "cancel_reset_learning"],
+        )
+
+    async def async_step_confirm_reset_learning(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Execute the per-area learning reset.
+
+        Wipes the area's learned history (intervals, priors, correlations,
+        cache) without removing the area from the configuration. Returns to
+        the area_action menu so the user can continue editing.
+        """
+        # Lazy import to avoid pulling service.py into the config-flow load path.
+        from .service import (  # noqa: PLC0415
+            _find_area_by_area_id,
+            async_purge_area_data,
+        )
+
+        area_id = self._area_to_reset
+        if not area_id:
+            return await self.async_step_init()
+
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is None:
+            _LOGGER.warning(
+                "Reset learning aborted for area_id '%s': coordinator not loaded",
+                area_id,
+            )
+            self._area_to_reset = None
+            return self.async_abort(reason="reset_learning_failed")
+
+        area_name, area = _find_area_by_area_id(coordinator, area_id)
+        if area_name is None or area is None:
+            _LOGGER.warning(
+                "Reset learning aborted: no configured area found for area_id '%s'",
+                area_id,
+            )
+            self._area_to_reset = None
+            return self.async_abort(reason="reset_learning_failed")
+
+        _LOGGER.info(
+            "Resetting learned history for area '%s' (area_id=%s) via options flow",
+            area_name,
+            area_id,
+        )
+
+        try:
+            await async_purge_area_data(self.hass, coordinator, area_name, area)
+        except HomeAssistantError:
+            _LOGGER.exception(
+                "Reset learning failed for area '%s' (area_id=%s)", area_name, area_id
+            )
+            self._area_to_reset = None
+            return self.async_abort(reason="reset_learning_failed")
+
+        self._area_to_reset = None
+        # Stay scoped to the same area so the user lands back in its menu.
+        self._area_being_edited = area_id
+        return await self.async_step_area_action()
+
+    async def async_step_cancel_reset_learning(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Cancel the learning reset and return to the area_action menu."""
+        area_id = self._area_to_reset
+        self._area_to_reset = None
+        if area_id:
+            self._area_being_edited = area_id
+            return await self.async_step_area_action()
+        return await self.async_step_init()
+
     async def async_step_global_settings(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage global settings."""
         if user_input is not None:
+            # Validate and coerce using the schema
+            schema = _create_global_settings_schema(self.config_entry.options)
+            user_input = schema(user_input)
+
             # Update the config entry options directly
             new_options = dict(self.config_entry.options)
             new_options.update(user_input)
@@ -2765,6 +2935,12 @@ class AreaOccupancyOptionsFlow(OptionsFlow, BaseOccupancyFlow):
             ),
             CONF_SLEEP_END: self.config_entry.options.get(
                 CONF_SLEEP_END, DEFAULT_SLEEP_END
+            ),
+            CONF_HEALTH_ENABLED: self.config_entry.options.get(
+                CONF_HEALTH_ENABLED, DEFAULT_HEALTH_ENABLED
+            ),
+            CONF_SENSOR_PRECISION: self.config_entry.options.get(
+                CONF_SENSOR_PRECISION, DEFAULT_SENSOR_PRECISION
             ),
         }
 

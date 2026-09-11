@@ -80,3 +80,44 @@
   away_timeout: 3
   state_topic: "espresense/devices/phone:firetabletbt"
   unique_id: 0456ceba-a710-4270-aa54-27be43ca8d75
+
+# ==========================================================
+# BED OCCUPANCY - NEIL (nightly numbers)
+#
+# Both read from binary_sensor.neil_in_bed (the DEBOUNCED sensor in
+# templates.yaml), never from the raw ESPHome entity.
+#
+# The window resets at 2 PM rather than midnight, so a 2 AM - 1 PM
+# sleep block lands inside ONE window instead of being split across
+# two nights.
+# ==========================================================
+
+- platform: history_stats
+  name: "Neil Time In Bed Tonight"
+  unique_id: neil_time_in_bed_tonight
+  entity_id: binary_sensor.neil_in_bed
+  state: "on"
+  type: time
+  end: "{{ now() }}"
+  start: >
+    {% if now() >= today_at('14:00') %}
+      {{ today_at('14:00') }}
+    {% else %}
+      {{ today_at('14:00') - timedelta(days=1) }}
+    {% endif %}
+
+# The nocturia counter -- the number the dose-timing question
+# actually turns on.
+- platform: history_stats
+  name: "Neil Out Of Bed Episodes Tonight"
+  unique_id: neil_oob_episodes_tonight
+  entity_id: binary_sensor.neil_in_bed
+  state: "off"
+  type: count
+  end: "{{ now() }}"
+  start: >
+    {% if now() >= today_at('14:00') %}
+      {{ today_at('14:00') }}
+    {% else %}
+      {{ today_at('14:00') - timedelta(days=1) }}
+    {% endif %}

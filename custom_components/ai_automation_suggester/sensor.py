@@ -22,38 +22,41 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from .const import (
-    DOMAIN,
-    INTEGRATION_NAME,
-    CONF_PROVIDER,
-    PROVIDER_STATUS_CONNECTED,
-    PROVIDER_STATUS_DISCONNECTED,
-    PROVIDER_STATUS_ERROR,
-    PROVIDER_STATUS_INITIALIZING,
-    CONF_MAX_INPUT_TOKENS,
-    DEFAULT_MAX_INPUT_TOKENS,
-    CONF_MAX_OUTPUT_TOKENS,
-    DEFAULT_MAX_OUTPUT_TOKENS,
-    # Model configuration keys (used to display current model)
-    CONF_OPENAI_MODEL,
     CONF_ANTHROPIC_MODEL,
+    CONF_CUSTOM_OPENAI_MODEL,
+    CONF_GENERIC_OPENAI_MODEL,
     CONF_GOOGLE_MODEL,
     CONF_GROQ_MODEL,
+    CONF_LITELLM_MODEL,
     CONF_LOCALAI_MODEL,
-    CONF_OLLAMA_MODEL,
-    CONF_CUSTOM_OPENAI_MODEL,
+    CONF_MAX_INPUT_TOKENS,
+    CONF_MAX_OUTPUT_TOKENS,
+    CONF_MINIMAX_MODEL,
     CONF_MISTRAL_MODEL,
-    CONF_PERPLEXITY_MODEL,
-    CONF_OPENROUTER_MODEL,
+    CONF_OLLAMA_MODEL,
     CONF_OPENAI_AZURE_DEPLOYMENT_ID,
-    CONF_GENERIC_OPENAI_MODEL,
+    # Model configuration keys (used to display current model)
+    CONF_OPENAI_MODEL,
+    CONF_OPENROUTER_MODEL,
+    CONF_PERPLEXITY_MODEL,
+    CONF_PROVIDER,
+    CONF_REQUESTY_MODEL,
+    DEFAULT_MAX_INPUT_TOKENS,
+    DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MODELS,
+    DOMAIN,
+    INTEGRATION_NAME,
+    PROVIDER_STATUS_CONNECTED,
+    PROVIDER_STATUS_ERROR,
+    PROVIDER_STATUS_INITIALIZING,
+    SENSOR_KEY_HISTORY_COUNT,
+    SENSOR_KEY_INPUT_TOKENS,
+    SENSOR_KEY_LAST_ERROR,
+    SENSOR_KEY_MODEL,
+    SENSOR_KEY_OUTPUT_TOKENS,
+    SENSOR_KEY_STATUS,
     # Sensor Keys from const.py
     SENSOR_KEY_SUGGESTIONS,
-    SENSOR_KEY_STATUS,
-    SENSOR_KEY_INPUT_TOKENS,
-    SENSOR_KEY_OUTPUT_TOKENS,
-    SENSOR_KEY_MODEL,
-    SENSOR_KEY_LAST_ERROR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,8 +72,11 @@ PROVIDER_TO_MODEL_KEY_MAP: dict[str, str] = {
     "Mistral AI": CONF_MISTRAL_MODEL,
     "Perplexity AI": CONF_PERPLEXITY_MODEL,
     "OpenRouter": CONF_OPENROUTER_MODEL,
+    "Requesty": CONF_REQUESTY_MODEL,
+    "MiniMax": CONF_MINIMAX_MODEL,
     "OpenAI Azure": CONF_OPENAI_AZURE_DEPLOYMENT_ID,
     "Generic OpenAI": CONF_GENERIC_OPENAI_MODEL,
+    "LiteLLM": CONF_LITELLM_MODEL,
 }
 
 SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
@@ -113,6 +119,13 @@ SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
         icon="mdi:alert-circle-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    SensorEntityDescription(
+        key=SENSOR_KEY_HISTORY_COUNT,
+        name="Suggestion History Count",
+        icon="mdi:history",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
 )
 
 async def async_setup_entry(
@@ -149,11 +162,17 @@ async def async_setup_entry(
             entities.append(AIModelSensor(coordinator, entry, specific_description))
         elif description.key == SENSOR_KEY_LAST_ERROR:
             entities.append(AILastErrorSensor(coordinator, entry, specific_description))
+        elif description.key == SENSOR_KEY_HISTORY_COUNT:
+            entities.append(AIHistoryCountSensor(coordinator, entry, specific_description))
         else:
             entities.append(AIBaseSensor(coordinator, entry, specific_description))
 
 
-    async_add_entities(entities, True)
+    # update_before_add must stay False: in HA 2025.x+, passing True calls
+    # CoordinatorEntity.async_update() during platform setup, which triggers a
+    # full LLM inference and exceeds the setup timeout (issue #166). Entities
+    # populate from coordinator data and refresh on generate_suggestions.
+    async_add_entities(entities, False)
     _LOGGER.debug("Sensor platform setup complete for provider: %s", provider_name)
 
 # ─────────────────────────────────────────────────────────────
@@ -216,6 +235,15 @@ class AISuggestionsSensor(AIBaseSensor):
     """Shows the availability of new AI suggestions."""
     _attr_should_poll = False
 
+    # Large payloads (full suggestion text, raw YAML block, entity list) can
+    # easily exceed the recorder's 16 KiB per-attribute limit, which spammed
+    # warnings and disabled attribute persistence for this sensor (issue #172).
+    # These fields are still exposed on the live state and via the HTTP API/
+    # store, they just aren't written to the history database.
+    _unrecorded_attributes = frozenset(
+        {"suggestions", "yaml_block", "description", "entities_processed", "suggestion"}
+    )
+
     def __init__(
         self,
         coordinator: DataUpdateCoordinator,
@@ -235,6 +263,8 @@ class AISuggestionsSensor(AIBaseSensor):
             "entities_processed": [],
             "provider": self._entry.data.get(CONF_PROVIDER, "unknown"),
             "entities_processed_count": 0,
+            "suggestion_count": 0,
+            "warnings": [],
         }
 
     async def async_added_to_hass(self) -> None:
@@ -268,7 +298,11 @@ class AISuggestionsSensor(AIBaseSensor):
             "last_update": data.get("last_update"),
             "entities_processed": data.get("entities_processed", []),
             "provider": self._entry.data.get(CONF_PROVIDER, "unknown"),
+            "model": data.get("model"),
             "entities_processed_count": len(data.get("entities_processed", [])),
+            "suggestion": data.get("suggestion"),
+            "suggestion_count": data.get("suggestion_count", 0),
+            "warnings": data.get("warnings", []),
         }
 
 # ─────────────────────────────────────────────────────────────
@@ -292,18 +326,22 @@ class AIProviderStatusSensor(AIBaseSensor):
         data = self.coordinator.data or {}
         if not self.coordinator.last_update_success:
             self._attr_native_value = PROVIDER_STATUS_ERROR
-        elif not data:
-            self._attr_native_value = PROVIDER_STATUS_INITIALIZING
         elif data.get("last_error"):
             self._attr_native_value = PROVIDER_STATUS_ERROR
-        elif "suggestions" in data:
+        elif data.get("request_succeeded") is True:
              self._attr_native_value = PROVIDER_STATUS_CONNECTED
+        elif data.get("request_succeeded") is False:
+            self._attr_native_value = PROVIDER_STATUS_ERROR
         else:
-            self._attr_native_value = PROVIDER_STATUS_DISCONNECTED
+            self._attr_native_value = PROVIDER_STATUS_INITIALIZING
 
         self._attr_extra_state_attributes = {
             "last_error_message": data.get("last_error", None),
             "last_attempted_update": data.get("last_update"),
+            "provider": data.get("provider", self._provider_name),
+            "model": data.get("model"),
+            "warnings": data.get("warnings", []),
+            "response_metadata": data.get("response_metadata", {}),
         }
 
 # ─────────────────────────────────────────────────────────────
@@ -406,7 +444,32 @@ class AILastErrorSensor(AIBaseSensor):
         """Update sensor state with the last error message."""
         data = self.coordinator.data or {}
         last_error = data.get("last_error")
-        self._attr_native_value = str(last_error) if last_error else "No Error"
+        error_text = str(last_error) if last_error else ""
+        self._attr_native_value = error_text[:255] if error_text else "No Error"
         self._attr_extra_state_attributes = {
-             "last_error_timestamp": data.get("last_update") if last_error else None,
+            "last_error_timestamp": data.get("last_update") if last_error else None,
+            "full_error_message": error_text or None,
+        }
+
+
+class AIHistoryCountSensor(AIBaseSensor):
+    """Shows how many suggestions are retained in history."""
+    _attr_should_poll = False
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator,
+        entry: ConfigEntry,
+        description: SensorEntityDescription,
+    ) -> None:
+        super().__init__(coordinator, entry, description)
+        self._update_state_and_attributes()
+
+    def _update_state_and_attributes(self) -> None:
+        """Update state from coordinator history data."""
+        data = self.coordinator.data or {}
+        self._attr_native_value = data.get("suggestion_count", 0)
+        self._attr_extra_state_attributes = {
+            "latest_suggestion_id": (data.get("suggestion") or {}).get("id"),
+            "latest_suggestion_status": (data.get("suggestion") or {}).get("status"),
         }

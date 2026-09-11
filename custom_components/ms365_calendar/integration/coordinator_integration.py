@@ -151,30 +151,45 @@ class MS365CalendarSyncCoordinator(DataUpdateCoordinator):
         #     self.event = None
         #     return None
 
+        #
+        # Get events that are current now
+        #
         today = datetime.now(timezone.utc)
-        events = self.data.overlapping(
-            today,
-            today + timedelta(days=1),
-        )
 
+        current_events = self.data.overlapping(
+            today,
+            today,
+        )
         started_event = None
         not_started_event = None
         all_day_event = None
-        for event in events:
+        for event in current_events:
             if event.is_all_day:
-                if not all_day_event and not self.is_finished(event):
+                if not all_day_event:
                     all_day_event = event
                 continue
-            if self.is_started(event) and not self.is_finished(event):
-                if not started_event:
-                    started_event = event
-                continue
-            if (
-                not self.is_finished(event)
-                and not event.is_all_day
-                and not not_started_event
-            ):
-                not_started_event = event
+            if not started_event and self.is_started(event):
+                started_event = event
+
+        #
+        # If no current events, then find unfinished event within next day
+        #
+        if not started_event and not all_day_event:
+            events = self.data.overlapping(
+                today,
+                today + timedelta(days=1),
+            )
+            for event in events:
+                if event.is_all_day:
+                    continue  # pragma: no cover
+                if self.is_started(event):
+                    continue  # pragma: no cover
+                if (
+                    not self.is_finished(event)
+                    and not event.is_all_day
+                    and not not_started_event
+                ):
+                    not_started_event = event
 
         vevent = None
         if started_event:
@@ -206,7 +221,7 @@ class MS365CalendarSyncCoordinator(DataUpdateCoordinator):
         if not isinstance(obj, datetime):
             date_obj = dt_util.start_of_local_day(
                 dt_util.dt.datetime.combine(obj, dt_util.dt.time.min)
-            )
+            )  # pragma: no cover
         else:
             date_obj = obj
 

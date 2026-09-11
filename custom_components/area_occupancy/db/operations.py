@@ -32,7 +32,7 @@ from ..const import (
     TIME_PRIOR_MIN_BOUND,
 )
 from ..data.entity_type import CorrelationType, InputType
-from ..time_utils import to_db_utc
+from ..time_utils import to_db_utc, to_utc
 from . import maintenance, queries
 
 ar = helpers.area_registry
@@ -132,7 +132,9 @@ def _update_existing_entity(
                 entity_obj.entity_id,
                 err,
             )
-    existing_entity.last_updated = entity_obj.last_updated
+    existing_entity.last_updated = (
+        to_utc(entity_obj.last_updated) if entity_obj.last_updated is not None else None
+    )
     existing_entity.previous_evidence = entity_obj.evidence
 
     # Restore probabilities from database
@@ -264,7 +266,10 @@ async def load_data(db: AreaOccupancyDB) -> None:
                 db.get_global_prior, area_name
             )
             if global_prior_data:
-                area_data.prior.set_global_prior(global_prior_data["prior_value"])
+                area_data.prior.set_global_prior(
+                    global_prior_data["prior_value"],
+                    calculation_date=global_prior_data.get("calculation_date"),
+                )
 
             # Process entities
             if entities:
@@ -347,6 +352,7 @@ def save_area_data(db: AreaOccupancyDB, area_name: str | None = None) -> None:
                 "area_id": cfg.area_id,
                 "purpose": cfg.purpose,
                 "threshold": cfg.threshold,
+                "adjacent_areas": list(getattr(cfg, "adjacent_areas", []) or []),
                 "updated_at": to_db_utc(dt_util.utcnow()),
             }
 
@@ -398,6 +404,15 @@ def save_area_data(db: AreaOccupancyDB, area_name: str | None = None) -> None:
                     )
                 # Update debounce timestamp only after a successful attempt
                 db.last_area_save_ts = time.monotonic()
+                # Hydrate AreaRelationships from each area's adjacent_areas
+                # JSON column. The schema row has just been committed, so
+                # this read sees the freshest version. Errors here are
+                # non-fatal (logged inside the helper) — the area save
+                # itself has already succeeded.
+                from . import relationships as _relationships  # noqa: PLC0415
+
+                for area_name_item in areas_to_save:
+                    _relationships.sync_adjacent_areas_from_config(db, area_name_item)
                 break
             except (sa.exc.OperationalError, sa.exc.TimeoutError) as err:
                 _LOGGER.warning("save_area_data attempt %d failed: %s", attempt, err)
@@ -783,10 +798,15 @@ def delete_area_data(db: AreaOccupancyDB, area_name: str) -> int:
             ).delete(synchronize_session=False)
 
             # Delete cross-area stats referencing this area
-            # involved_areas is a JSON array; use cast+like for SQLite compatibility
+            # involved_areas is a JSON array; use cast+like for SQLite
+            # compatibility. Escape LIKE metacharacters so area names
+            # containing % or _ can't over-match other areas' rows.
+            escaped_name = (
+                area_name.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+            )
             session.query(db.CrossAreaStats).filter(
                 sa.cast(db.CrossAreaStats.involved_areas, sa.String).like(
-                    f'%"{area_name}"%'
+                    f'%"{escaped_name}"%', escape="\\"
                 )
             ).delete(synchronize_session=False)
 
@@ -1127,6 +1147,16 @@ def save_time_priors(
             saved_count = 0
             updated_count = 0
 
+            # Preload all existing priors for the area in one query instead
+            # of probing per slot (up to 168 SELECTs per area per cycle)
+            existing_by_slot = {
+                (row.day_of_week, row.time_slot): row
+                for row in session.query(db.Priors).filter_by(
+                    entry_id=db.coordinator.entry_id,
+                    area_name=area_name,
+                )
+            }
+
             for (day_of_week, time_slot), prior_value in time_priors.items():
                 data_points = data_points_per_slot.get((day_of_week, time_slot), 0)
 
@@ -1136,17 +1166,7 @@ def save_time_priors(
                     TIME_PRIOR_MIN_BOUND, min(TIME_PRIOR_MAX_BOUND, prior_value)
                 )
 
-                # Check if prior already exists
-                existing = (
-                    session.query(db.Priors)
-                    .filter_by(
-                        entry_id=db.coordinator.entry_id,
-                        area_name=area_name,
-                        day_of_week=day_of_week,
-                        time_slot=time_slot,
-                    )
-                    .first()
-                )
+                existing = existing_by_slot.get((day_of_week, time_slot))
 
                 if existing:
                     # Update existing record

@@ -63,6 +63,8 @@
       "ollama": {
         "title": "Configure Ollama",
         "data": {
+          "ollama_base_url": "Ollama/Open WebUI Base URL",
+          "ollama_api_key": "Ollama/Open WebUI API Key (optional)",
           "ollama_ip": "Ollama IP Address",
           "ollama_port": "Ollama Port",
           "ollama_https": "Use HTTPS for Ollama",
@@ -115,6 +117,28 @@
           "max_output_tokens": "Max Output Tokens"
         }
       },
+      "requesty": {
+        "title": "Configure Requesty",
+        "data": {
+          "requesty_api_key": "Requesty API Key",
+          "requesty_model": "Requesty Model",
+          "requesty_reasoning_max_tokens": "Requesty Reasoning Max Tokens",
+          "requesty_temperature": "Temperature",
+          "max_input_tokens": "Max Input Tokens",
+          "max_output_tokens": "Max Output Tokens"
+        }
+      },
+      "minimax": {
+        "title": "Configure MiniMax",
+        "data": {
+          "minimax_api_key": "MiniMax API Key",
+          "minimax_model": "MiniMax Model",
+          "minimax_base_url": "MiniMax API Region",
+          "minimax_temperature": "Temperature",
+          "max_input_tokens": "Max Input Tokens",
+          "max_output_tokens": "Max Output Tokens"
+        }
+      },
       "openai_azure": {
         "title": "Configure OpenAI Azure",
         "data": {
@@ -136,6 +160,17 @@
           "generic_openai_temperature": "Temperature",
           "generic_openai_validation_endpoint": "Validation URL (should end with 'models')",
           "generic_openai_enable_validation": "Enable Validation",
+          "max_input_tokens": "Max Input Tokens",
+          "max_output_tokens": "Max Output Tokens"
+        }
+      },
+      "litellm": {
+        "title": "Configure LiteLLM",
+        "data": {
+          "litellm_model": "LiteLLM Model (e.g. openai/gpt-4o, anthropic/claude-sonnet-4-6, groq/llama-3.3-70b-versatile)",
+          "litellm_api_key": "API Key (optional if set via environment variable)",
+          "litellm_api_base": "API Base URL (optional, for LiteLLM proxy)",
+          "litellm_temperature": "Temperature",
           "max_input_tokens": "Max Input Tokens",
           "max_output_tokens": "Max Output Tokens"
         }
@@ -172,6 +207,8 @@
           "localai_https": "Use HTTPS for LocalAI",
           "localai_model": "LocalAI Model",
           "localai_temperature": "Temperature (LocalAI)",
+          "ollama_base_url": "Ollama/Open WebUI Base URL",
+          "ollama_api_key": "Ollama/Open WebUI API Key (optional)",
           "ollama_ip": "Ollama IP Address",
           "ollama_port": "Ollama Port",
           "ollama_https": "Use HTTPS for Ollama",
@@ -192,6 +229,14 @@
           "openrouter_model": "OpenRouter Model",
           "openrouter_reasoning_max_tokens": "OpenRouter Reasoning Max Tokens",
           "openrouter_temperature": "Temperature (OpenRouter)",
+          "requesty_api_key": "Requesty API Key",
+          "requesty_model": "Requesty Model",
+          "requesty_reasoning_max_tokens": "Requesty Reasoning Max Tokens",
+          "requesty_temperature": "Temperature (Requesty)",
+          "minimax_api_key": "MiniMax API Key",
+          "minimax_model": "MiniMax Model",
+          "minimax_base_url": "MiniMax API Region",
+          "minimax_temperature": "Temperature (MiniMax)",
           "openai_azure_api_key": "Azure OpenAI API Key",
           "openai_azure_deployment_id": "Azure Deployment ID",
           "openai_azure_endpoint": "Azure Endpoint",
@@ -203,8 +248,19 @@
           "generic_openai_temperature": "Temperature (Generic OpenAI)",
           "generic_openai_validation_endpoint": "Validation URL (Generic OpenAI, should end with 'models')",
           "generic_openai_enable_validation": "Enable Validation (Generic OpenAI)",
+          "litellm_api_key": "LiteLLM API Key",
+          "litellm_model": "LiteLLM Model",
+          "litellm_api_base": "LiteLLM API Base URL",
+          "litellm_temperature": "Temperature (LiteLLM)",
           "max_input_tokens": "Max Input Tokens",
-          "max_output_tokens": "Max Output Tokens"
+          "max_output_tokens": "Max Output Tokens",
+          "custom_system_prompt": "Persistent Custom System Prompt",
+          "excluded_domains": "Excluded Domains",
+          "excluded_entities": "Excluded Entities",
+          "excluded_areas": "Excluded Areas",
+          "history_retention": "Suggestion History Retention",
+          "request_timeout": "Provider Request Timeout",
+          "openai_reasoning_effort": "OpenAI Reasoning Effort"
         },
         "description": "Adjust settings for your AI providers. Fields relevant to your configured provider will be used. Common settings like token limits are configured per provider."
       }
@@ -245,6 +301,44 @@
         "automation_limit": {
           "name": "Automation Limit",
           "description": "Maximum number of automations to analyze (default: 100)."
+        },
+        "script_read_yaml": {
+          "name": "Read 'scripts.yaml' file",
+          "description": "Reads and appends the yaml code of the scripts found in the 'scripts.yaml' file. This action will use a lot of input tokens, use it with care and with models with a large context window (e.g. Gemini)."
+        },
+        "script_limit": {
+          "name": "Script Limit",
+          "description": "Maximum number of scripts to analyze (default: 100)."
+        },
+        "exclude_domains": {
+          "name": "Exclude Domains",
+          "description": "Domains to exclude from analysis."
+        },
+        "exclude_entities": {
+          "name": "Exclude Entities",
+          "description": "Entity IDs to exclude from analysis."
+        },
+        "exclude_areas": {
+          "name": "Exclude Areas",
+          "description": "Areas to exclude from analysis."
+        }
+      }
+    },
+    "clear_history": {
+      "name": "Clear Suggestion History",
+      "description": "Clear all stored AI automation suggestions."
+    },
+    "update_suggestion": {
+      "name": "Update Suggestion",
+      "description": "Update the review status for a stored AI automation suggestion.",
+      "fields": {
+        "suggestion_id": {
+          "name": "Suggestion ID",
+          "description": "The suggestion ID to update."
+        },
+        "status": {
+          "name": "Status",
+          "description": "The new review status."
         }
       }
     }

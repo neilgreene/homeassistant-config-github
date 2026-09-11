@@ -1133,3 +1133,50 @@
       attributes:
         sun_elevation: "{{ state_attr('sun.sun', 'elevation') }}"
         description: "Sun is below horizon"
+
+# ============================
+# Bed Occupancy - Neil (debounced)
+#
+# The RAW entity
+# binary_sensor.bed_presence_masterbedroom_occupied_left
+# is deliberately left untouched so that instant-reaction automations
+# (e.g. turning the light on when Neil gets out of bed) still fire with
+# no delay. Do NOT put a delayed_off filter on the ESPHome device.
+#
+# Thresholds from Neil's 30 Aug 2026 export: 73 off-periods, 64 of them
+# under 90 s, only 6 at 2 minutes or longer. Shortest genuine
+# out-of-bed trip was 2.0 min, so a 90 s delay_off suppresses 88% of
+# the noise without touching a single real trip.
+#
+# availability: guards the nocturia count. Without it, an ESPHome
+# dropout renders the state template as false, and 90 s later that
+# registers as a phantom out-of-bed episode. Unavailable now stays
+# unavailable instead of being silently counted as "got up".
+# ============================
+
+- binary_sensor:
+    - name: "Neil In Bed"
+      unique_id: neil_in_bed_clean
+      device_class: occupancy
+      state: >
+        {{ is_state('binary_sensor.bed_presence_masterbedroom_occupied_left', 'on') }}
+      availability: >
+        {{ states('binary_sensor.bed_presence_masterbedroom_occupied_left')
+           not in ['unavailable', 'unknown'] }}
+      delay_on: "00:00:20"    # ignore a 20 s sit on the edge of the bed
+      delay_off: "00:01:30"   # ignore anything shorter than 90 s
+
+# Numeric mirror of the clean sensor. state_class: measurement is what
+# creates long-term statistics, which no purge setting ever deletes --
+# so this survives even the 10-day trim, forever, at hourly resolution.
+# Hourly mean = percent of that hour spent in bed.
+
+- sensor:
+    - name: "Neil Bed Occupancy"
+      unique_id: neil_bed_occupancy_pct
+      unit_of_measurement: "%"
+      state_class: measurement
+      state: >
+        {{ 100 if is_state('binary_sensor.neil_in_bed', 'on') else 0 }}
+      availability: >
+        {{ states('binary_sensor.neil_in_bed') not in ['unavailable', 'unknown'] }}

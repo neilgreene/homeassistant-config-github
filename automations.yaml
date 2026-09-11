@@ -5886,3 +5886,105 @@
         data:
           message: Chloe has left home.
   mode: restart
+- id: '1787083200000'
+  alias: '[MONITOR]: Recorder - Trim History Except Neil Bed Sensors'
+  description: >-
+    Recorder retention is global, so configuration.yaml sets
+    purge_keep_days: 90 to hold a 90-day window for the bed sensors.
+    This runs just after the nightly auto-purge (04:12) and trims every
+    OTHER entity back to 10 days, which is what stops the database
+    ballooning from ~2.7 GB to ~24 GB.
+
+    The reject chains below ARE the keep-list. Anything not named in
+    them gets 10 days. Add any future bed or chair sensor here.
+
+    Deliberately NOT gated on input_boolean.automations_enabled: if this
+    stops running, the database grows unchecked.
+  triggers:
+  - trigger: time
+    at: '04:30:00'
+  conditions: []
+  actions:
+  # THE REJECT CHAINS BELOW ARE THE KEEP-LIST. Anything not rejected
+  # here is trimmed to 10 days. Add an entity to a reject() call to give
+  # it the full 90 days.
+  #
+  # Kept at 90 days:
+  #   binary_sensor.bed_presence_masterbedroom_occupied_left  (raw)
+  #   binary_sensor.neil_in_bed                               (debounced)
+  #   sensor.neil_bed_occupancy
+  #   sensor.neil_time_in_bed_tonight
+  #   sensor.neil_out_of_bed_episodes_tonight
+  #
+  # Split into three calls rather than one big entity list: purging by
+  # domain is far cheaper than naming entities, so only the two domains
+  # that actually contain a kept entity get enumerated.
+
+  # 1. Every domain that contains nothing worth keeping -- purged wholesale.
+  - action: recorder.purge_entities
+    data:
+      keep_days: 10
+      domains: >-
+        {{ states | map(attribute='domain') | unique
+           | reject('eq', 'binary_sensor')
+           | reject('eq', 'sensor')
+           | list }}
+  # 2. Every sensor EXCEPT Neil's three bed metrics.
+  - action: recorder.purge_entities
+    data:
+      keep_days: 10
+      entity_id: >-
+        {{ states.sensor | map(attribute='entity_id')
+           | reject('eq', 'sensor.neil_bed_occupancy')
+           | reject('eq', 'sensor.neil_time_in_bed_tonight')
+           | reject('eq', 'sensor.neil_out_of_bed_episodes_tonight')
+           | list }}
+  # 3. Every binary_sensor EXCEPT the raw and debounced bed sensors.
+  - action: recorder.purge_entities
+    data:
+      keep_days: 10
+      entity_id: >-
+        {{ states.binary_sensor | map(attribute='entity_id')
+           | reject('eq', 'binary_sensor.bed_presence_masterbedroom_occupied_left')
+           | reject('eq', 'binary_sensor.neil_in_bed')
+           | list }}
+  mode: single
+- id: '1787083200001'
+  alias: '[MONITOR]: Bed Log - Append Every Debounced Transition'
+  description: >-
+    One line per transition of the debounced bed sensor, written to
+    /config/bed_log.csv, outside the recorder database. Survives database
+    migrations, restores and any future change to a purge default.
+
+    Columns: iso timestamp , new state , seconds the previous state lasted.
+    Roughly 12 lines a night; three months is about 1,100 lines. If a night
+    produces 150 lines the debounce is not working and the thresholds in
+    templates.yaml need revisiting.
+
+    REQUIRES the File integration set up as notify.bed_log, or this errors
+    on every transition.
+
+    Deliberately NOT gated on input_boolean.automations_enabled: flipping
+    the global kill switch for debugging must not silently punch a hole in
+    the sleep record.
+  mode: queued
+  max: 25
+  triggers:
+  - trigger: state
+    entity_id: binary_sensor.neil_in_bed
+    to: 'on'
+  - trigger: state
+    entity_id: binary_sensor.neil_in_bed
+    to: 'off'
+  conditions: []
+  actions:
+  - action: notify.send_message
+    target:
+      entity_id: notify.bed_log
+    data:
+      # from_state is None on the first transition after a restart, which
+      # would otherwise raise on .last_changed and drop the line.
+      message: >-
+        {{ now().isoformat() }},{{ trigger.to_state.state }},{{
+        ((as_timestamp(now()) - as_timestamp(trigger.from_state.last_changed))
+        | round(0)) if trigger.from_state else 0 }}

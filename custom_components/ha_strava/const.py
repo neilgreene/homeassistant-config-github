@@ -9,6 +9,11 @@ CONFIG_ENTRY_TITLE = "Strava"
 AUTH_CALLBACK_PATH = "/auth/external/callback"
 OAUTH2_AUTHORIZE = "https://www.strava.com/oauth/authorize"
 OAUTH2_TOKEN = "https://www.strava.com/oauth/token"
+OAUTH2_SCOPES = "activity:read_all,profile:read_all,activity:write"
+
+# Services
+SERVICE_UPDATE_ACTIVITY = "update_activity"
+SERVICE_GET_ACTIVITY_ROUTE = "get_activity_route"
 
 # Camera Config
 CONF_PHOTOS = "conf_photos"
@@ -31,6 +36,11 @@ CONF_API_RETRY_BASE_DELAY_SECONDS = 1
 CONF_WEBHOOK_ID = "webhook_id"
 CONF_CALLBACK_URL = "callback_url"
 WEBHOOK_SUBSCRIPTION_URL = "https://www.strava.com/api/v3/push_subscriptions"
+
+# Strava API tier / shared-app mode
+CONF_STRAVA_APP_MODE = "strava_app_mode"
+STRAVA_APP_MODE_SOLO = "solo"  # 1-to-1: one API app per user (default)
+STRAVA_APP_MODE_SHARED = "shared"  # 10-to-1: one API app shared by multiple users
 CONF_DISTANCE_UNIT_OVERRIDE = "conf_distance_unit"
 CONF_DISTANCE_UNIT_OVERRIDE_DEFAULT = "default"
 CONF_DISTANCE_UNIT_OVERRIDE_METRIC = "metric"
@@ -75,7 +85,8 @@ CONF_SENSOR_CADENCE_AVG = "average_cadence"
 CONF_SENSOR_CALORIES = "kcal"
 CONF_SENSOR_ELEVATION = "elevation_gain"
 CONF_SENSOR_POWER = "power"
-CONF_SENSOR_TROPHIES = "trophies"
+CONF_SENSOR_TROPHIES = "achievements"
+CONF_SENSOR_PR_COUNT = "pr_count"
 CONF_SENSOR_TITLE = "title"
 CONF_SENSOR_CITY = "city"
 CONF_SENSOR_MOVING_TIME = "moving_time"
@@ -86,13 +97,16 @@ CONF_SENSOR_HEART_RATE_MAX = "max_heartrate"
 CONF_SENSOR_BIGGEST_RIDE_DISTANCE = "biggest_ride_distance"
 CONF_SENSOR_BIGGEST_ELEVATION_GAIN = "biggest_climb_elevation_gain"
 
-# All 50 Supported Activity Types
+# All 56 Supported Activity Types
 SUPPORTED_ACTIVITY_TYPES = [
     "AlpineSki",
     "BackcountrySki",
     "Badminton",
+    "Basketball",
     "Canoeing",
+    "Cricket",
     "Crossfit",
+    "Dance",
     "EBikeRide",
     "Elliptical",
     "EMountainBikeRide",
@@ -107,6 +121,8 @@ SUPPORTED_ACTIVITY_TYPES = [
     "Kitesurf",
     "MountainBikeRide",
     "NordicSki",
+    "Other",
+    "Padel",
     "Pickleball",
     "Pilates",
     "Racquetball",
@@ -132,6 +148,7 @@ SUPPORTED_ACTIVITY_TYPES = [
     "VirtualRide",
     "VirtualRow",
     "VirtualRun",
+    "Volleyball",
     "Walk",
     "WeightTraining",
     "Wheelchair",
@@ -194,6 +211,7 @@ CONF_SENSORS = {
     CONF_SENSOR_ELEVATION: {"icon": "mdi:elevation-rise"},
     CONF_SENSOR_POWER: {"icon": "mdi:dumbbell"},
     CONF_SENSOR_TROPHIES: {"icon": "mdi:trophy"},
+    CONF_SENSOR_PR_COUNT: {"icon": "mdi:medal"},
     CONF_SENSOR_HEART_RATE_AVG: {"icon": "mdi:heart-pulse"},
     CONF_SENSOR_HEART_RATE_MAX: {"icon": "mdi:heart-pulse"},
 }
@@ -308,6 +326,12 @@ CONF_ATTRIBUTE_SENSORS = {
         "unit": None,
         "state_class": "measurement",
     },
+    CONF_SENSOR_PR_COUNT: {
+        "icon": "mdi:medal",
+        "device_class": None,
+        "unit": None,
+        "state_class": "measurement",
+    },
     CONF_SENSOR_KUDOS: {
         "icon": "mdi:thumb-up-outline",
         "device_class": None,
@@ -382,6 +406,7 @@ CONF_ACTIVITY_TYPE_SENSOR_METRICS = [
     CONF_SENSOR_CADENCE_AVG,
     CONF_SENSOR_POWER,
     CONF_SENSOR_TROPHIES,
+    CONF_SENSOR_PR_COUNT,
     CONF_SENSOR_KUDOS,
 ]
 
@@ -401,6 +426,7 @@ CONF_ATTRIBUTE_SENSOR_TYPES = [
     CONF_SENSOR_CADENCE_AVG,
     CONF_SENSOR_POWER,
     CONF_SENSOR_TROPHIES,
+    CONF_SENSOR_PR_COUNT,
     CONF_SENSOR_KUDOS,
 ]
 
@@ -409,8 +435,11 @@ ACTIVITY_TYPE_ICONS = {
     "AlpineSki": "mdi:ski",
     "BackcountrySki": "mdi:ski",
     "Badminton": "mdi:badminton",
+    "Basketball": "mdi:basketball",
     "Canoeing": "mdi:kayaking",
+    "Cricket": "mdi:cricket",
     "Crossfit": "mdi:weight-lifter",
+    "Dance": "mdi:dance-ballroom",
     "EBikeRide": "mdi:bike",
     "Elliptical": "mdi:elliptical",
     "EMountainBikeRide": "mdi:bike",
@@ -425,6 +454,8 @@ ACTIVITY_TYPE_ICONS = {
     "Kitesurf": "mdi:kitesurfing",
     "MountainBikeRide": "mdi:bike",
     "NordicSki": "mdi:ski",
+    "Other": "mdi:help-circle",
+    "Padel": "mdi:tennis",
     "Pickleball": "mdi:tennis",
     "Pilates": "mdi:yoga",
     "Racquetball": "mdi:tennis",
@@ -450,6 +481,7 @@ ACTIVITY_TYPE_ICONS = {
     "VirtualRide": "mdi:bike",
     "VirtualRow": "mdi:rowing",
     "VirtualRun": "mdi:run",
+    "Volleyball": "mdi:volleyball",
     "Walk": "mdi:walk",
     "WeightTraining": "mdi:weight-lifter",
     "Wheelchair": "mdi:wheelchair",
@@ -473,6 +505,8 @@ CONF_ATTR_ATHLETE_URL = "athlete_url"
 CONF_ATTR_COMMUTE = "commute"
 CONF_ATTR_PRIVATE = "private"
 CONF_ATTR_POLYLINE = "polyline"
+CONF_ATTR_PR_SEGMENTS = "pr_segments"
+CONF_ATTR_KOM_SEGMENTS = "kom_segments"
 
 # Device Source Tracking
 CONF_ATTR_DEVICE_NAME = "device_name"
@@ -502,9 +536,11 @@ def generate_device_id(athlete_id: str, device_type: str) -> str:
     return f"strava_{athlete_id}_{device_type}"
 
 
-def generate_device_name(athlete_name: str, device_type: str) -> str:
-    """Generate standardized device name."""
-    return f"Strava {athlete_name} {device_type.title()}"
+def generate_device_name(
+    athlete_name: str, device_type: str  # pylint: disable=unused-argument
+) -> str:
+    """Generate standardized device name (short form; athlete identity lives on the config entry)."""
+    return device_type.title()
 
 
 def generate_recent_activity_device_id(athlete_id: str, activity_index: int = 0) -> str:
@@ -515,12 +551,12 @@ def generate_recent_activity_device_id(athlete_id: str, activity_index: int = 0)
 
 
 def generate_recent_activity_device_name(
-    athlete_name: str, activity_index: int = 0
+    athlete_name: str, activity_index: int = 0  # pylint: disable=unused-argument
 ) -> str:
-    """Generate standardized recent activity device name."""
+    """Generate standardized recent activity device name (short form; athlete identity lives on the config entry)."""
     if activity_index == 0:
-        return f"Strava {athlete_name} Recent Activity"
-    return f"Strava {athlete_name} Recent Activity {activity_index + 1}"
+        return "Recent Activity"
+    return f"Recent Activity {activity_index + 1}"
 
 
 def generate_sensor_id(athlete_id: str, activity_type: str, sensor_type: str) -> str:
@@ -528,18 +564,13 @@ def generate_sensor_id(athlete_id: str, activity_type: str, sensor_type: str) ->
     return f"strava_{athlete_id}_{activity_type}_{sensor_type}"
 
 
-def generate_sensor_name(
-    athlete_name: str, activity_type: str, sensor_type: str
-) -> str:
-    """Generate standardized sensor name."""
+def generate_sensor_name(sensor_type: str) -> str:
+    """Generate standardized sensor name (short form, for use with has_entity_name)."""
     # Special case for calories sensor
     if sensor_type == "kcal":
-        formatted_sensor = "Calories"
-    else:
-        # Format sensor type for display (replace underscores with spaces and title case)
-        formatted_sensor = sensor_type.replace("_", " ").title()
-
-    return f"Strava {athlete_name} {activity_type.title()} {formatted_sensor}"
+        return "Calories"
+    # Format sensor type for display (replace underscores with spaces and title case)
+    return sensor_type.replace("_", " ").title()
 
 
 def generate_recent_activity_sensor_id(
@@ -551,45 +582,48 @@ def generate_recent_activity_sensor_id(
     return f"strava_{athlete_id}_recent_{activity_index + 1}_{sensor_type}"
 
 
-def generate_recent_activity_sensor_name(
-    athlete_name: str, sensor_type: str, activity_index: int = 0
-) -> str:
-    """Generate standardized recent activity sensor name."""
+def generate_recent_activity_sensor_name(sensor_type: str) -> str:
+    """Generate standardized recent activity sensor name (short form, for use with has_entity_name)."""
     # Special case for calories sensor
     if sensor_type == "kcal":
-        formatted_sensor = "Calories"
-    else:
-        # Format sensor type for display (replace underscores with spaces and title case)
-        formatted_sensor = sensor_type.replace("_", " ").title()
-
-    if activity_index == 0:
-        return f"Strava {athlete_name} Recent Activity {formatted_sensor}"
-    return (
-        f"Strava {athlete_name} Recent Activity {activity_index + 1} {formatted_sensor}"
-    )
+        return "Calories"
+    # Format sensor type for display (replace underscores with spaces and title case)
+    return sensor_type.replace("_", " ").title()
 
 
-def generate_gear_device_id(athlete_id: str, gear_index: int) -> str:
+def generate_gear_device_id(athlete_id: str, gear_id: str) -> str:
     """Generate standardized gear device ID."""
-    return f"strava_{athlete_id}_gear_{gear_index}"
+    return f"strava_{athlete_id}_gear_{gear_id}"
 
 
-def generate_gear_device_name(athlete_name: str, gear_name: str) -> str:
-    """Generate standardized gear device name."""
-    return f"Strava {athlete_name} {gear_name}"
-
-
-def generate_gear_sensor_id(athlete_id: str, gear_index: int, sensor_type: str) -> str:
-    """Generate standardized gear sensor ID."""
-    return f"strava_{athlete_id}_gear_{gear_index}_{sensor_type}"
-
-
-def generate_gear_sensor_name(
-    athlete_name: str, gear_name: str, sensor_type: str
+def generate_gear_device_name(
+    athlete_name: str, gear_name: str  # pylint: disable=unused-argument
 ) -> str:
-    """Generate standardized gear sensor name."""
-    formatted_sensor = sensor_type.replace("_", " ").title()
-    return f"Strava {athlete_name} {gear_name} {formatted_sensor}"
+    """Generate standardized gear device name (short form; athlete identity lives on the config entry)."""
+    return gear_name
+
+
+def generate_gear_sensor_id(athlete_id: str, gear_id: str, sensor_type: str) -> str:
+    """Generate standardized gear sensor ID."""
+    return f"strava_{athlete_id}_gear_{gear_id}_{sensor_type}"
+
+
+def generate_gear_sensor_name(sensor_type: str) -> str:
+    """Generate standardized gear sensor name (short form, for use with has_entity_name)."""
+    return sensor_type.replace("_", " ").title()
+
+
+def get_gear_type_label(gear_id: str) -> str:
+    """Return the gear type label ("Bike" or "Shoes") from a Strava gear ID.
+
+    Strava gear IDs are prefixed by type: "b" for bikes (including indoor
+    trainers) and "g" for shoes. Falls back to "Gear" for anything else.
+    """
+    if gear_id and gear_id.startswith("b"):
+        return "Bike"
+    if gear_id and gear_id.startswith("g"):
+        return "Shoes"
+    return "Gear"
 
 
 def normalize_activity_type(activity_type: str) -> str:

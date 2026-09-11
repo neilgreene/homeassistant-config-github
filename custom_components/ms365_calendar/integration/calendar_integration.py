@@ -15,8 +15,6 @@ from homeassistant.components.calendar import (
     CalendarEntity,
     CalendarEntityFeature,
     CalendarEvent,
-    extract_offset,
-    is_offset_reached,
 )
 from homeassistant.const import CONF_ENTITY_ID, CONF_NAME
 from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse
@@ -28,14 +26,12 @@ from homeassistant.util import dt as dt_util
 from ..classes.config_entry import MS365ConfigEntry
 from ..classes.entity import MS365Entity
 from ..const import CONF_ENABLE_UPDATE, CONF_ENTITY_NAME, EVENT_HA_EVENT
-from ..helpers.utils import clean_html
 from .const_integration import (
     ATTR_ALL_DAY,
     ATTR_COLOR,
     ATTR_DATA,
     ATTR_EVENT_ID,
     ATTR_HEX_COLOR,
-    ATTR_OFFSET,
     ATTR_SYNC_STATE,
     CONF_CAN_EDIT,
     CONF_DEVICE_ID,
@@ -44,7 +40,6 @@ from .const_integration import (
     CONF_HOURS_BACKWARD_TO_GET,
     CONF_HOURS_FORWARD_TO_GET,
     CONF_MAX_RESULTS,
-    DEFAULT_OFFSET,
     DOMAIN,
     EVENT_CREATE_CALENDAR_EVENT,
     EVENT_MODIFY_CALENDAR_EVENT,
@@ -64,6 +59,7 @@ from .schema_integration import (
     CALENDAR_SERVICE_RESPOND_SCHEMA,
 )
 from .utils_integration import (
+    clean_html,
     format_event_data,
     get_end_date,
     get_hass_date,
@@ -149,6 +145,7 @@ class MS365CalendarEntity(MS365Entity, CalendarEntity):
 
     _attr_should_poll = False
     _unrecorded_attributes = frozenset((ATTR_DATA, ATTR_COLOR, ATTR_HEX_COLOR))
+    _attr_initial_color: str | None
 
     def __init__(
         self,
@@ -168,7 +165,6 @@ class MS365CalendarEntity(MS365Entity, CalendarEntity):
         self._end_offset = entity.get(CONF_HOURS_FORWARD_TO_GET)
         self._event = None
         self.entity_id = entity_id
-        self._offset_reached = False
         self._data_attribute = []
 
         self._update_supported = update_supported
@@ -181,6 +177,8 @@ class MS365CalendarEntity(MS365Entity, CalendarEntity):
         self._max_results = entity.get(CONF_MAX_RESULTS)
         self._error = None
         self.exclude = entity.get(CONF_EXCLUDE)
+        if hasattr(self.api.calendar, ATTR_HEX_COLOR) and self.api.calendar.hex_color:
+            self._attr_initial_color = self.api.calendar.hex_color
 
     @property
     def extra_state_attributes(self):
@@ -197,7 +195,6 @@ class MS365CalendarEntity(MS365Entity, CalendarEntity):
             attributes[ATTR_ALL_DAY] = (
                 self._event.all_day if self._event is not None else False
             )
-            attributes[ATTR_OFFSET] = self._offset_reached
         return attributes
 
     @property
@@ -251,6 +248,7 @@ class MS365CalendarEntity(MS365Entity, CalendarEntity):
         return event
 
     def _sort_events(self, events):
+        events = list(events)
         for event in events:
             event.start_sort = event.start
             if event.is_all_day:
@@ -288,19 +286,10 @@ class MS365CalendarEntity(MS365Entity, CalendarEntity):
             return
 
         self._event = deepcopy(self._build_calendar_event(vevent))
-        self._event.summary, offset = extract_offset(
-            self._event.summary, DEFAULT_OFFSET
-        )
-        start = MS365CalendarSyncCoordinator.to_datetime(self._event.start)
-        self._offset_reached = is_offset_reached(start, offset)
 
     def _build_extra_attributes(self, range_start, range_end):
         if self.coordinator.data is not None:
-            data_events = [
-                event
-                for event in self.coordinator.data
-                if event.end >= range_start and event.start <= range_end
-            ]
+            data_events = self.coordinator.data.overlapping(range_start, range_end)
             data_events = self._sort_events(data_events)
 
             data = [format_event_data(event) for event in data_events]

@@ -1,0 +1,12 @@
+{
+  "_board_id_user_set_migrated": true,
+  "_dashboard_identity": {
+    "dashboard_id": "EJbfNPGgpL8IRZ6YCVqH9aKAoYgHcCUC"
+  },
+  "bed-presence-2d2158.yaml": {
+    "mac_address": "B0:81:84:2D:21:58"
+  },
+  "bed-presence-c18de0.yaml": {
+    "mac_address": "E4:B0:63:C1:8D:E0"
+  }
+}

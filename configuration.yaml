@@ -22,6 +22,8 @@ default_config:
 homeassistant:
   allowlist_external_dirs:
     - "/config/logs"
+    # Required by the File integration writing /config/bed_log.csv.
+    - "/config"
   packages: !include_dir_named packages
 
 
@@ -130,3 +132,28 @@ system_log:
 # LAYER 1: Multi-Source Presence Detection
 # ==================================================
 
+
+# ----------------------------------------------------------
+# RECORDER
+# Global history retention.
+#
+# Home Assistant's recorder has ONE global retention window --
+# there is no per-entity retention setting. To keep a 90 day
+# window for binary_sensor.bed_presence_masterbedroom_occupied_left
+# ("Neil Sleep Detection"), the global window is set to 90 days and
+# the automation
+#   "[MONITOR]: Recorder - Trim History Except Neil Bed Sensor"
+# purges every OTHER entity back down to 10 days each night.
+#
+# Without that nightly trim the database (~2.7 GB at 10 days)
+# would grow to roughly 24 GB.
+#
+# Long-term statistics are NOT affected by either setting --
+# they are kept indefinitely regardless.
+#
+# Requires a full Home Assistant restart to take effect.
+# ----------------------------------------------------------
+recorder:
+  purge_keep_days: 90
+  auto_purge: true
+  commit_interval: 10

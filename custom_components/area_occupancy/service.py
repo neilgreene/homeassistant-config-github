@@ -1,5 +1,7 @@
 """Service definitions for the Area Occupancy Detection integration."""
 
+from __future__ import annotations
+
 import contextlib
 from dataclasses import asdict
 import logging
@@ -18,6 +20,7 @@ from .utils import get_coordinator
 
 if TYPE_CHECKING:
     from .area.area import Area
+    from .coordinator import AreaOccupancyCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,7 +31,7 @@ PURGE_AREA_HISTORY_SCHEMA = vol.Schema(
 )
 
 
-def _collect_entity_states(hass: HomeAssistant, area: "Area") -> dict[str, str]:
+def _collect_entity_states(hass: HomeAssistant, area: Area) -> dict[str, str]:
     """Collect current states for all entities in an area.
 
     Args:
@@ -48,7 +51,7 @@ def _collect_entity_states(hass: HomeAssistant, area: "Area") -> dict[str, str]:
     return entity_states
 
 
-def _collect_likelihood_data(area: "Area") -> dict[str, dict[str, Any]]:
+def _collect_likelihood_data(area: Area) -> dict[str, dict[str, Any]]:
     """Collect likelihood data for all entities in an area.
 
     Args:
@@ -121,7 +124,7 @@ def _collect_likelihood_data(area: "Area") -> dict[str, dict[str, Any]]:
 
 
 def _build_analysis_data(
-    hass: HomeAssistant, area: "Area", area_name: str
+    hass: HomeAssistant, area: Area, area_name: str
 ) -> dict[str, Any]:
     """Build analysis data dictionary for an area.
 
@@ -220,7 +223,7 @@ async def _export_config(hass: HomeAssistant, call: ServiceCall) -> dict[str, An
 
 def _find_area_by_area_id(
     coordinator: Any, area_id: str
-) -> tuple[str | None, "Area | None"]:
+) -> tuple[str | None, Area | None]:
     """Look up an area by its Home Assistant area_id.
 
     Args:
@@ -236,31 +239,29 @@ def _find_area_by_area_id(
     return None, None
 
 
-async def _purge_area_history(hass: HomeAssistant, call: ServiceCall) -> dict[str, Any]:
-    """Purge learned history for a single configured area.
+async def async_purge_area_data(
+    hass: HomeAssistant,
+    coordinator: AreaOccupancyCoordinator,
+    area_name: str,
+    area: Area,
+) -> dict[str, Any]:
+    """Purge DB rows + in-memory state for a single configured area.
 
     Deletes all database rows for the area (intervals, priors, correlations,
     caches, etc.) without removing the area from configuration. The area's
     in-memory prior cache is cleared and a coordinator refresh is requested so
     the UI immediately reflects the purge.
+
+    Shared by the public ``purge_area_history`` service and the options-flow
+    "Reset learning" action — both want the same effect (data wiped, area
+    config preserved). Caller is responsible for the area-id → name lookup
+    and any user-facing validation messaging; this helper assumes the area
+    exists in the coordinator.
+
+    Returns the same result dict the service handler exposes:
+    ``{"area_id", "area_name", "entities_deleted", "shell_repersisted",
+    "purged_at"}``. Raises ``HomeAssistantError`` on hard DB failure.
     """
-    coordinator = get_coordinator(hass)
-    area_id = call.data[CONF_AREA_ID]
-
-    area_name, area = _find_area_by_area_id(coordinator, area_id)
-    if area_name is None or area is None:
-        known = sorted(a.config.area_id for a in coordinator.areas.values())
-        raise ServiceValidationError(
-            f"No configured area found for area_id '{area_id}'. "
-            f"Known area_ids: {', '.join(known) if known else '(none)'}"
-        )
-
-    _LOGGER.info(
-        "Purging learned history for area '%s' (area_id=%s) on user request",
-        area_name,
-        area_id,
-    )
-
     try:
         deleted = await hass.async_add_executor_job(
             coordinator.db.delete_area_data, area_name
@@ -313,12 +314,44 @@ async def _purge_area_history(hass: HomeAssistant, call: ServiceCall) -> dict[st
         )
 
     return {
-        "area_id": area_id,
+        "area_id": area.config.area_id,
         "area_name": area_name,
         "entities_deleted": int(deleted),
         "shell_repersisted": shell_repersisted,
         "purged_at": dt_util.utcnow().isoformat(),
     }
+
+
+async def _purge_area_history(hass: HomeAssistant, call: ServiceCall) -> dict[str, Any]:
+    """Service handler: purge learned history for a single configured area.
+
+    Resolves the caller-supplied ``area_id`` and delegates to
+    ``async_purge_area_data``. The service-call layer owns the user-facing
+    validation messaging; the helper is kept ServiceCall-free so the
+    options-flow "Reset learning" action can reuse it.
+    """
+    coordinator = get_coordinator(hass)
+    area_id = call.data[CONF_AREA_ID]
+
+    area_name, area = _find_area_by_area_id(coordinator, area_id)
+    if area_name is None or area is None:
+        known = sorted(
+            a.config.area_id
+            for a in coordinator.areas.values()
+            if isinstance(a.config.area_id, str)
+        )
+        raise ServiceValidationError(
+            f"No configured area found for area_id '{area_id}'. "
+            f"Known area_ids: {', '.join(known) if known else '(none)'}"
+        )
+
+    _LOGGER.info(
+        "Purging learned history for area '%s' (area_id=%s) on user request",
+        area_name,
+        area_id,
+    )
+
+    return await async_purge_area_data(hass, coordinator, area_name, area)
 
 
 async def async_setup_services(hass: HomeAssistant) -> None:
@@ -358,3 +391,13 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         schema=PURGE_AREA_HISTORY_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
+
+
+def async_unload_services(hass: HomeAssistant) -> None:
+    """Remove the domain services.
+
+    Called when the last config entry unloads; otherwise the handlers
+    linger and raise once the coordinator is gone.
+    """
+    for service in ("run_analysis", "export_config", "purge_area_history"):
+        hass.services.async_remove(DOMAIN, service)

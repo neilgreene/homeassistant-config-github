@@ -11,11 +11,26 @@ from typing import TYPE_CHECKING
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
-from ..const import DEFAULT_LOOKBACK_DAYS, TIME_PRIOR_MAX_BOUND, TIME_PRIOR_MIN_BOUND
-from ..db.queries import is_occupied_intervals_cache_valid
-from ..time_utils import ensure_timezone_aware, ensure_utc_datetime, to_local, to_utc
+from ..const import (
+    ACCURACY_WINDOW_HOURS,
+    DEFAULT_LOOKBACK_DAYS,
+    MAX_PRIOR,
+    MIN_PRIOR,
+    PRIOR_WARMUP_MIN_SPAN_HOURS,
+    TIME_PRIOR_MAX_BOUND,
+    TIME_PRIOR_MIN_BOUND,
+)
+from ..db.correlation import (
+    CORRELATION_FAILURE_ERRORS,
+    get_correlatable_entities_by_area,
+)
+from ..db.queries import (
+    get_area_created_at,
+    get_occupied_intervals_cache_age_hours,
+    is_occupied_intervals_cache_valid,
+)
+from ..time_utils import ensure_utc_datetime, to_local, to_utc
 from ..utils import format_area_names
-from .entity_type import InputType
 from .prior import Prior
 
 if TYPE_CHECKING:
@@ -29,17 +44,25 @@ async def run_full_analysis(
 ) -> None:
     """Run the full analysis chain for all areas.
 
-    This function orchestrates the complete analysis process:
+    This function orchestrates the complete 14-step analysis process:
     1. Sync states from recorder
     2. Database health check and pruning
-    3. Populate occupied intervals cache
-    4. Run interval aggregation
-    5. Run numeric aggregation
-    6. Recalculate priors for all areas
-    7. Run correlation analysis
-    8. Save data (preserve decay state before refresh)
-    9. Refresh coordinator
-    10. Save data (persist all changes)
+    3. Sensor health check (per-entity anomalies → repair issues)
+    4. Populate occupied intervals cache
+    5. Run interval aggregation
+    6. Run numeric aggregation
+    7. Recalculate priors for all areas
+    8. Run correlation analysis
+    9. Transition learning (adjacent-areas Phase 3: count chain
+       observations into ``AreaTransitions`` for the Bayesian boost
+       and decay modifier)
+    10. Shadow metrics (no feedback into behavior): trust-score
+        calibration + decision stability vs ground truth (#499), and
+        the online-prior diff vs the DB-computed prior (#500)
+    11. Pipeline health check (per-area calc anomalies → repair issues)
+    12. Save data (preserve decay state before refresh)
+    13. Refresh coordinator
+    14. Save data (persist all changes)
 
     Args:
         coordinator: The coordinator instance containing areas and database
@@ -52,10 +75,28 @@ async def run_full_analysis(
 
     analysis_start_time = time.perf_counter()
     failed_steps: list[str] = []
-    total_steps = 11
+    cancelled = False
+    total_steps = 14
 
     async def _run_step(step_num: int, step_name: str, coro: Awaitable[None]) -> None:
         """Run a single analysis step with timing and error tracking."""
+        nonlocal cancelled
+        # Skip remaining steps once HA has signalled shutdown — the inner
+        # awaitable would still create the coroutine object so we close it
+        # to avoid a "coroutine was never awaited" warning. We don't append
+        # to ``failed_steps`` because a clean cancellation isn't a failure
+        # the caller should back off on, but we *do* set ``cancelled`` so
+        # the summary path can suppress the misleading "12/12 succeeded"
+        # log line and skip writing ``_last_analysis_duration_ms`` (which
+        # otherwise pollutes the slow-analysis health threshold with a
+        # near-zero fast-skip duration).
+        if coordinator.stop_requested:
+            cancelled = True
+            coro.close()
+            _LOGGER.debug(
+                "Step %d: %s skipped — shutdown in progress", step_num, step_name
+            )
+            return
         start = time.perf_counter()
         try:
             await coro
@@ -76,36 +117,6 @@ async def run_full_analysis(
     async def _sync_states() -> None:
         await coordinator.db.sync_states()
 
-    async def _health_check_and_prune() -> None:
-        health_ok = await coordinator.hass.async_add_executor_job(
-            coordinator.db.periodic_health_check
-        )
-        if not health_ok:
-            _LOGGER.warning(
-                "Database health check found issues for areas: %s",
-                format_area_names(coordinator),
-            )
-        await coordinator.hass.async_add_executor_job(
-            coordinator.db.prune_old_intervals
-        )
-
-    async def _sensor_health_check() -> None:
-        for area in coordinator.areas.values():
-            excluded = set()
-            if area.wasp_entity_id:
-                excluded.add(area.wasp_entity_id)
-            if area.sleep_entity_id:
-                excluded.add(area.sleep_entity_id)
-            issues = area.health_monitor.check_health(
-                area.entities.entities, excluded_entity_ids=excluded or None
-            )
-            if issues:
-                _LOGGER.info(
-                    "Area '%s' has %d sensor health issue(s)",
-                    area.area_name,
-                    len(issues),
-                )
-
     async def _recalculate_priors() -> None:
         for area in coordinator.areas.values():
             await area.run_prior_analysis()
@@ -113,6 +124,9 @@ async def run_full_analysis(
     async def _run_correlations() -> None:
         await run_correlation_analysis(coordinator)
         await coordinator.async_refresh_correlations()
+
+    async def _pipeline_health_check() -> None:
+        await _run_pipeline_health_check(coordinator)
 
     async def _save_data() -> None:
         await coordinator.hass.async_add_executor_job(coordinator.db.save_data)
@@ -122,8 +136,10 @@ async def run_full_analysis(
 
     try:
         await _run_step(1, "sync_states", _sync_states())
-        await _run_step(2, "health_check_and_prune", _health_check_and_prune())
-        await _run_step(3, "sensor_health_check", _sensor_health_check())
+        await _run_step(
+            2, "health_check_and_prune", _run_health_check_and_prune(coordinator)
+        )
+        await _run_step(3, "sensor_health_check", _run_sensor_health_check(coordinator))
         await _run_step(
             4,
             "populate_occupied_intervals_cache",
@@ -137,9 +153,12 @@ async def run_full_analysis(
         )
         await _run_step(7, "recalculate_priors", _recalculate_priors())
         await _run_step(8, "correlation_analysis", _run_correlations())
-        await _run_step(9, "save_data_before_refresh", _save_data())
-        await _run_step(10, "refresh_coordinator", _refresh())
-        await _run_step(11, "save_data_after_refresh", _save_data())
+        await _run_step(9, "transition_learning", _run_transition_learning(coordinator))
+        await _run_step(10, "shadow_metrics", _run_shadow_metrics(coordinator))
+        await _run_step(11, "pipeline_health_check", _pipeline_health_check())
+        await _run_step(12, "save_data_before_refresh", _save_data())
+        await _run_step(13, "refresh_coordinator", _refresh())
+        await _run_step(14, "save_data_after_refresh", _save_data())
 
     except Exception as err:
         _LOGGER.error("Fatal error during analysis pipeline: %s", err)
@@ -149,7 +168,18 @@ async def run_full_analysis(
     finally:
         succeeded = total_steps - len(failed_steps)
         final_elapsed_ms = (time.perf_counter() - analysis_start_time) * 1000
-        if failed_steps:
+        if cancelled:
+            # Cancelled mid-run by EVENT_HOMEASSISTANT_STOP. Report the
+            # outcome distinctly (the per-step debug logs already record
+            # which steps were skipped) and skip both the success log
+            # line and the duration write — a fast-skip duration would
+            # mask a previously-slow successful cycle in the
+            # slow-analysis health check.
+            _LOGGER.info(
+                "Analysis cancelled mid-run after %.2f ms — shutdown in progress",
+                final_elapsed_ms,
+            )
+        elif failed_steps:
             _LOGGER.warning(
                 "Analysis completed: %d/%d steps succeeded (FAILED: %s) in %.2f ms",
                 succeeded,
@@ -158,6 +188,11 @@ async def run_full_analysis(
                 final_elapsed_ms,
             )
         else:
+            # Only persist the duration on a fully successful run — a partial
+            # / aborted cycle's duration isn't comparable to the slow-analysis
+            # threshold and would let a fast-failing run mask a previously-
+            # slow successful one (or vice versa).
+            coordinator._last_analysis_duration_ms = final_elapsed_ms  # noqa: SLF001
             _LOGGER.info(
                 "Full analysis completed: %d/%d steps succeeded in %.2f ms",
                 total_steps,
@@ -171,6 +206,215 @@ async def run_full_analysis(
         raise HomeAssistantError(
             f"Analysis pipeline had {len(failed_steps)} failed step(s): "
             f"{', '.join(failed_steps)}"
+        )
+
+
+async def _run_health_check_and_prune(coordinator: AreaOccupancyCoordinator) -> None:
+    """Run the periodic DB health check and prune old intervals."""
+    health_ok = await coordinator.hass.async_add_executor_job(
+        coordinator.db.periodic_health_check
+    )
+    if not health_ok:
+        _LOGGER.warning(
+            "Database health check found issues for areas: %s",
+            format_area_names(coordinator),
+        )
+    await coordinator.hass.async_add_executor_job(coordinator.db.prune_old_intervals)
+
+
+async def _run_sensor_health_check(coordinator: AreaOccupancyCoordinator) -> None:
+    """Check per-entity sensor health for every area (repairs pipeline)."""
+    if not coordinator.integration_config.health_enabled:
+        for area in coordinator.areas.values():
+            area.health_monitor.clear_all_issues()
+        return
+    for area in coordinator.areas.values():
+        excluded = set()
+        if area.wasp_entity_id:
+            excluded.add(area.wasp_entity_id)
+        if area.sleep_entity_id:
+            excluded.add(area.sleep_entity_id)
+        issues = area.health_monitor.check_health(
+            area.entities.entities, excluded_entity_ids=excluded or None
+        )
+        if issues:
+            _LOGGER.info(
+                "Area '%s' has %d sensor health issue(s)",
+                area.area_name,
+                len(issues),
+            )
+
+
+async def _run_transition_learning(coordinator: AreaOccupancyCoordinator) -> None:
+    """Record adjacent-area transition observations (Phase 3 learning)."""
+    # Lazy import — db.transitions only matters when adjacency is in use.
+    from ..db.transitions import record_transitions_for_entry  # noqa: PLC0415
+
+    if coordinator.config_entry is None:
+        return
+    await coordinator.hass.async_add_executor_job(
+        record_transitions_for_entry,
+        coordinator.db,
+        coordinator.config_entry.entry_id,
+    )
+
+
+async def _run_shadow_metrics(coordinator: AreaOccupancyCoordinator) -> None:
+    """Score each area's probability stream against ground truth (#499).
+
+    Shadow mode: computes calibration + decision-stability metrics from
+    the coordinator's rolling tick buffer and the motion-confirmed
+    occupied intervals, caches them for diagnostics, and logs a summary.
+    Nothing feeds back into probability, thresholds, or decay.
+    """
+    # Lazy import mirrors the transition-learning step's pattern.
+    from .metrics import compute_accuracy_metrics  # noqa: PLC0415
+
+    now = dt_util.utcnow()
+    window_start = now - timedelta(hours=ACCURACY_WINDOW_HOURS)
+    for area_name in coordinator.areas:
+        samples = [
+            s
+            for s in coordinator.accuracy_samples_for(area_name)
+            if s.timestamp >= window_start
+        ]
+        if not samples:
+            continue
+        intervals = await coordinator.hass.async_add_executor_job(
+            lambda name=area_name: coordinator.db.get_occupied_intervals(
+                area_name=name, start_time=window_start
+            )
+        )
+        metrics = compute_accuracy_metrics(samples, intervals)
+        coordinator.set_accuracy_metrics(area_name, metrics)
+        _LOGGER.debug(
+            "Accuracy (shadow) for area %s: samples=%d ece=%.4f agreement=%.3f "
+            "false_on=%s false_off=%s decision_flips=%d truth_flips=%d",
+            area_name,
+            metrics.sample_count,
+            metrics.expected_calibration_error or 0.0,
+            metrics.agreement or 0.0,
+            f"{metrics.false_on_rate:.3f}"
+            if metrics.false_on_rate is not None
+            else "n/a",
+            f"{metrics.false_off_rate:.3f}"
+            if metrics.false_off_rate is not None
+            else "n/a",
+            metrics.decision_transitions,
+            metrics.truth_transitions,
+        )
+
+    # Online-prior shadow diff (#500): compare the incremental estimator
+    # against the DB-computed prior that step 7 just recalculated. A
+    # persistent, growing divergence means a bug in one of them.
+    for area_name, area in coordinator.areas.items():
+        estimator = coordinator.online_prior_for(area_name)
+        if estimator is None:
+            continue
+        online = estimator.prior(now)
+        if online is None:
+            continue
+        stored = area.prior.global_prior
+        if stored is None:
+            _LOGGER.debug(
+                "Online prior (shadow) for area %s: online=%.4f db=<not yet "
+                "calculated> observed_days=%.2f",
+                area_name,
+                online,
+                estimator.observed_days(now),
+            )
+            continue
+        _LOGGER.debug(
+            "Online prior (shadow) for area %s: online=%.4f db=%.4f diff=%+.4f "
+            "observed_days=%.2f",
+            area_name,
+            online,
+            stored,
+            online - stored,
+            estimator.observed_days(now),
+        )
+    await coordinator.async_save_online_priors()
+
+
+async def _run_pipeline_health_check(
+    coordinator: AreaOccupancyCoordinator,
+) -> None:
+    """Check pipeline-scope anomalies after priors + correlation have run.
+
+    Reads area age and cache age from the DB (executor-offloaded), reads
+    the prior + correlation state from in-memory area objects, and feeds
+    the inputs to ``HealthMonitor.check_pipeline_health``. The monitor
+    merges these with the sensor-scope issues from step 3 and updates the
+    HA repair registry in one pass. Extracted from ``run_full_analysis``
+    to keep the orchestrator's complexity inside ruff's threshold.
+    """
+    if not coordinator.integration_config.health_enabled:
+        for area in coordinator.areas.values():
+            area.health_monitor.clear_all_issues()
+        return
+
+    now_aware = dt_util.utcnow()
+    # Canonical correlatable set per area — defined by the same helper
+    # the correlation runner uses, so the denominator matches what the
+    # pipeline actually attempts. Filtering by ``analysis_error`` alone
+    # would miss reclassifications and warm-up state.
+    correlatable_by_area = get_correlatable_entities_by_area(coordinator)
+
+    for area in coordinator.areas.values():
+        try:
+            created_at = await coordinator.hass.async_add_executor_job(
+                get_area_created_at, coordinator.db, area.area_name
+            )
+            cache_age_hours = await coordinator.hass.async_add_executor_job(
+                get_occupied_intervals_cache_age_hours,
+                coordinator.db,
+                area.area_name,
+            )
+        except (ValueError, TypeError, RuntimeError, OSError) as err:
+            _LOGGER.debug(
+                "Pipeline health: failed to read DB state for area '%s': %s",
+                area.area_name,
+                err,
+                exc_info=True,
+            )
+            continue
+
+        area_age_hours: float | None = (
+            (now_aware - created_at).total_seconds() / 3600
+            if created_at is not None
+            else None
+        )
+
+        # Denominator: entities that the correlation runner would attempt.
+        # Numerator: among those, the subset whose last attempt landed in
+        # a real failure mode (CORRELATION_FAILURE_ERRORS). ``not_analyzed``
+        # is treated as not-yet-attempted and excluded from the failure
+        # count — so a brand-new area doesn't fire the issue while priors
+        # are still warming up.
+        correlatable_ids = correlatable_by_area.get(area.area_name, {})
+        correlatable_count = len(correlatable_ids)
+        failure_count = sum(
+            1
+            for entity_id in correlatable_ids
+            if (entity := area.entities.entities.get(entity_id)) is not None
+            and entity.analysis_error in CORRELATION_FAILURE_ERRORS
+        )
+
+        last_calculation_at = area.prior.last_calculation_at
+        last_prior_calculation_hours_ago: float | None = (
+            (now_aware - last_calculation_at).total_seconds() / 3600
+            if last_calculation_at is not None
+            else None
+        )
+
+        area.health_monitor.check_pipeline_health(
+            area_age_hours=area_age_hours,
+            has_global_prior=area.prior.global_prior is not None,
+            last_prior_calculation_hours_ago=last_prior_calculation_hours_ago,
+            cache_age_hours=cache_age_hours,
+            last_analysis_duration_ms=coordinator.last_analysis_duration_ms,
+            correlation_failure_count=failure_count,
+            correlatable_entity_count=correlatable_count,
         )
 
 
@@ -225,7 +469,30 @@ class PriorAnalyzer:
         )
 
     def calculate_and_update_prior(self, days: int = DEFAULT_LOOKBACK_DAYS) -> None:
-        """Calculate and update the prior probability for the area."""
+        """Calculate and update the prior probability for the area.
+
+        Fixes two related bugs from issue #520:
+
+        - Bug A (silent freeze): if this area's current motion/sleep/media
+          sensors have *no* interval data at all (e.g. right after a sensor
+          swap wiped the old sensor's history, or a brand-new area before
+          the recorder sync has run), the old code silently no-op'd at
+          DEBUG level and left ``global_prior`` at whatever it last was —
+          forever, since nothing else flags a prior that's stopped
+          updating. This now logs at WARNING and (via
+          ``Prior.last_calculation_at`` staying unset) makes the
+          staleness detectable by
+          ``HealthMonitor._check_insufficient_priors``.
+        - Bug B (0.99 clamp): the observation-window denominator used to be
+          "now minus the first *occupied* interval's start", so a single
+          occupied interval minutes after a reset/swap computed
+          occupied/elapsed ~= 1.0 and clamped straight to ``MAX_PRIOR``
+          every time. The denominator basis is now "now minus the later of
+          the configured lookback start and the earliest data point we
+          have for the current sensor configuration" (any state, not just
+          occupied), with an explicit minimum-span warm-up guard below
+          which the calculation is deferred entirely rather than trusted.
+        """
         _LOGGER.debug(
             "Starting prior analysis for area %s (lookback: %d days)",
             self.area_name,
@@ -233,205 +500,112 @@ class PriorAnalyzer:
         )
 
         try:
-            # 1. Get occupied intervals based on motion sensors (ground truth)
-            # Note: get_occupied_intervals already performs merging and timeout extension
-            # The intervals returned are the final merged intervals
+            # 1. Ground-truth data check. Looks at *any* interval state
+            # (not just "on") for this area's current motion/sleep/media
+            # sensors, so it tells us whether we have data at all for the
+            # current sensor configuration — independent of whether any of
+            # it happens to be occupied.
+            first_seen = self.db.get_first_interval_timestamp(self.area_name)
+            if first_seen is None:
+                # Case 1 (#520 Bug A): genuinely no data yet for this
+                # area's current sensors. Don't silently keep whatever
+                # global_prior happens to be in memory forever — log
+                # loudly and leave last_calculation_at untouched so the
+                # staleness check can eventually flag it.
+                _LOGGER.warning(
+                    "No interval data of any kind found for area %s's "
+                    "current sensors (lookback: %d days) — prior "
+                    "calculation skipped this cycle; global_prior remains "
+                    "%s. Expected right after a sensor swap or new area "
+                    "until recorder history syncs; if it persists, check "
+                    "that the configured motion/sleep/media sensors are "
+                    "reporting state changes",
+                    self.area_name,
+                    days,
+                    self.area.prior.global_prior,
+                )
+                return
+
+            first_seen = ensure_utc_datetime(first_seen)
+            now = ensure_utc_datetime(dt_util.utcnow())
+            lookback_start = now - timedelta(days=days)
+
+            # Warm-up-guard denominator basis (#520 Bug B): the observed
+            # period starts at the later of the configured lookback window
+            # and the earliest data point we actually have for the current
+            # sensor configuration — never at the first *occupied*
+            # interval, which is what let a single occupied interval
+            # minutes after a reset compute occupied/elapsed ~= 1.0.
+            period_start = max(lookback_start, first_seen)
+
+            if period_start > now:
+                _LOGGER.error(
+                    "'now' (%s) is before the observation period start "
+                    "(%s) for area %s. This indicates severe clock skew "
+                    "or timezone issues. Using fallback prior.",
+                    now,
+                    period_start,
+                    self.area_name,
+                )
+                self.area.prior.set_global_prior(MIN_PRIOR)
+                return
+
+            observation_span_seconds = (now - period_start).total_seconds()
+            min_span_seconds = PRIOR_WARMUP_MIN_SPAN_HOURS * 3600
+
+            if observation_span_seconds < min_span_seconds:
+                # Case 2a (#520 Bug B): data exists but not enough of it
+                # yet to trust a computed ratio. Leave global_prior as-is —
+                # None falls back to MIN_PRIOR (+ any purpose floor) via
+                # Prior.value; a pre-existing value from before a swap is
+                # left alone rather than replaced by a noisy one-sample
+                # estimate. Deliberately do NOT advance
+                # last_calculation_at, so a warm-up that never completes
+                # still eventually surfaces via the staleness check once
+                # the area is old enough.
+                _LOGGER.debug(
+                    "Observation span too short for area %s (%.1fh < "
+                    "%.1fh warm-up minimum) — deferring prior update",
+                    self.area_name,
+                    observation_span_seconds / 3600,
+                    min_span_seconds / 3600,
+                )
+                return
+
+            # 2. Occupied intervals (ground-truth "on" time) over the same
+            # window. May legitimately be empty — an area with data but
+            # genuinely zero occupied time is a valid, low prior, not the
+            # same condition as "no data" handled above (Case 2b).
             occupied_intervals = self.get_occupied_intervals(days)
 
-            if not occupied_intervals:
-                _LOGGER.debug(
-                    "No occupancy data found for prior calculation in area %s",
-                    self.area_name,
-                )
-                return
-
-            # Log interval statistics for debugging
-            # Note: The intervals from get_occupied_intervals are already merged,
-            # so we can't see the raw count here. The merge happens in queries.get_occupied_intervals.
-            # We log what we have: the final merged interval count and duration.
-            occupied_duration_before_calc = sum(
-                (
-                    ensure_timezone_aware(end) - ensure_timezone_aware(start)
-                ).total_seconds()
-                for start, end in occupied_intervals
-            )
-            _LOGGER.debug(
-                "Prior calculation for area %s: %d merged intervals, %.1f hours total duration",
-                self.area_name,
-                len(occupied_intervals),
-                occupied_duration_before_calc / 3600,
-            )
-
-            # 2. Calculate global prior using actual data period
-            # Determine actual data period from intervals (not fixed lookback)
-            # Ensure all datetime objects are timezone-aware UTC
-            # Use ensure_timezone_aware for consistency (intervals are already timezone-aware)
-
-            # Diagnostic logging: log interval details before calculation
-            _LOGGER.debug(
-                "Prior calculation for area %s: %d intervals",
-                self.area_name,
-                len(occupied_intervals),
-            )
             if occupied_intervals:
-                # Log first few intervals for debugging
-                for i, (start, end) in enumerate(occupied_intervals[:5]):
-                    start_aware = ensure_timezone_aware(start)
-                    end_aware = ensure_timezone_aware(end)
-                    _LOGGER.debug(
-                        "Interval %d: start=%s (tz=%s), end=%s (tz=%s), duration=%.2f",
-                        i,
-                        start_aware,
-                        start_aware.tzinfo,
-                        end_aware,
-                        end_aware.tzinfo,
-                        (end_aware - start_aware).total_seconds(),
-                    )
-
-            # Validate interval data: check all intervals have start <= end
-            invalid_intervals = []
-            for i, (start, end) in enumerate(occupied_intervals):
-                start_aware = ensure_utc_datetime(start)
-                end_aware = ensure_utc_datetime(end)
-                if start_aware > end_aware:
-                    invalid_intervals.append((i, start_aware, end_aware))
-
-            if invalid_intervals:
-                _LOGGER.error(
-                    "Invalid interval data for area %s: %d intervals have start > end",
-                    self.area_name,
-                    len(invalid_intervals),
-                )
-                for i, start, end in invalid_intervals[:5]:  # Log first 5
-                    _LOGGER.error(
-                        "  Interval %d: start=%s > end=%s (difference: %.2f seconds)",
-                        i,
-                        start,
-                        end,
-                        (start - end).total_seconds(),
-                    )
-                # Filter out invalid intervals
-                occupied_intervals = [
+                invalid_intervals = [
                     (start, end)
                     for start, end in occupied_intervals
-                    if ensure_utc_datetime(start) <= ensure_utc_datetime(end)
+                    if ensure_utc_datetime(start) > ensure_utc_datetime(end)
                 ]
-                if not occupied_intervals:
+                if invalid_intervals:
                     _LOGGER.error(
-                        "All intervals invalid for area %s, using fallback prior",
+                        "Invalid interval data for area %s: %d intervals "
+                        "have start > end; excluding them",
                         self.area_name,
+                        len(invalid_intervals),
                     )
-                    self.area.prior.set_global_prior(0.01)
-                    return
+                    occupied_intervals = [
+                        (start, end)
+                        for start, end in occupied_intervals
+                        if ensure_utc_datetime(start) <= ensure_utc_datetime(end)
+                    ]
 
-            # Convert all intervals to UTC and find bounds
-            first_interval_start = min(
-                ensure_utc_datetime(start) for start, end in occupied_intervals
-            )
-            last_interval_end = max(
-                ensure_utc_datetime(end) for start, end in occupied_intervals
-            )
-            now = ensure_utc_datetime(dt_util.utcnow())
-
-            # Validate that intervals are chronologically valid
-            if first_interval_start > last_interval_end:
-                _LOGGER.error(
-                    "Invalid interval data for area %s: first_interval_start (%s) > last_interval_end (%s). "
-                    "This may indicate timezone issues or corrupted data.",
-                    self.area_name,
-                    first_interval_start,
-                    last_interval_end,
-                )
-                # Use fallback prior
-                self.area.prior.set_global_prior(0.01)
-                _LOGGER.debug(
-                    "Prior analysis completed for area %s: global_prior=0.010 (fallback due to invalid interval bounds)",
-                    self.area_name,
-                )
-                return
-
-            # Diagnostic logging: log key timestamps
-            _LOGGER.debug(
-                "Period calculation for area %s: first_interval_start=%s (tz=%s), "
-                "last_interval_end=%s (tz=%s), now=%s (tz=%s)",
-                self.area_name,
-                first_interval_start,
-                first_interval_start.tzinfo,
-                last_interval_end,
-                last_interval_end.tzinfo,
-                now,
-                now.tzinfo,
-            )
-
-            # Use actual period: from first interval to now (or last interval if very recent)
-            # If last interval is more than 1 hour old, use it; otherwise use now
-            # Ensure we use UTC-aware datetimes for all calculations
-            if (now - last_interval_end).total_seconds() > 3600:
-                actual_period_end = last_interval_end
-            else:
-                actual_period_end = now
-
-            # Defensive check: ensure actual_period_end >= first_interval_start
-            if actual_period_end < first_interval_start:
-                _LOGGER.warning(
-                    "actual_period_end (%s) < first_interval_start (%s) for area %s. "
-                    "This may indicate timezone issues or clock skew. Using now instead.",
-                    actual_period_end,
-                    first_interval_start,
-                    self.area_name,
-                )
-                actual_period_end = now
-                # Double-check after using now
-                if actual_period_end < first_interval_start:
-                    _LOGGER.error(
-                        "Even 'now' (%s) is before first_interval_start (%s) for area %s. "
-                        "This indicates severe clock skew or timezone issues. Using fallback prior.",
-                        actual_period_end,
-                        first_interval_start,
-                        self.area_name,
-                    )
-                    self.area.prior.set_global_prior(0.01)
-                    _LOGGER.debug(
-                        "Prior analysis completed for area %s: global_prior=0.010 (fallback due to clock skew)",
-                        self.area_name,
-                    )
-                    return
-
-            actual_period_duration = (
-                actual_period_end - first_interval_start
-            ).total_seconds()
-
-            # Guard against zero or negative duration (bad timestamps or clock skew)
-            if actual_period_duration <= 0:
-                _LOGGER.warning(
-                    "Invalid period duration (%.2f seconds) for area %s. "
-                    "first_interval_start=%s, actual_period_end=%s. "
-                    "This may indicate bad timestamps or clock skew. "
-                    "Using safe fallback prior of 0.01.",
-                    actual_period_duration,
-                    self.area_name,
-                    first_interval_start,
-                    actual_period_end,
-                )
-                # Set safe fallback prior and return early
-                self.area.prior.set_global_prior(0.01)
-                _LOGGER.debug(
-                    "Prior analysis completed for area %s: global_prior=0.010 (fallback due to invalid period)",
-                    self.area_name,
-                )
-                return
-
-            # Calculate occupied duration (ensure UTC-aware)
-            # Use ensure_utc_datetime to ensure all datetimes are in UTC
             occupied_duration = sum(
                 (ensure_utc_datetime(end) - ensure_utc_datetime(start)).total_seconds()
                 for start, end in occupied_intervals
             )
 
-            # Use actual period for prior calculation
-            # Ensure valid probability (0.01 to 0.99)
+            # Ensure valid probability (MIN_PRIOR to MAX_PRIOR)
             global_prior = max(
-                0.01, min(0.99, occupied_duration / actual_period_duration)
+                MIN_PRIOR,
+                min(MAX_PRIOR, occupied_duration / observation_span_seconds),
             )
 
             # 3. Update the Prior object
@@ -442,7 +616,7 @@ class PriorAnalyzer:
                 self.area_name,
                 global_prior,
                 occupied_duration / 3600,
-                actual_period_duration / 86400,
+                observation_span_seconds / 86400,
                 len(occupied_intervals),
             )
 
@@ -451,10 +625,10 @@ class PriorAnalyzer:
                 success = self.db.save_global_prior(
                     area_name=self.area_name,
                     prior_value=global_prior,
-                    data_period_start=first_interval_start,
-                    data_period_end=actual_period_end,
+                    data_period_start=period_start,
+                    data_period_end=now,
                     total_occupied_seconds=occupied_duration,
-                    total_period_seconds=actual_period_duration,
+                    total_period_seconds=observation_span_seconds,
                     interval_count=len(occupied_intervals),
                     calculation_method="interval_analysis",
                 )
@@ -463,7 +637,7 @@ class PriorAnalyzer:
                         "Global prior saved for area %s: %.3f (period: %.1f days, %d intervals)",
                         self.area_name,
                         global_prior,
-                        actual_period_duration / 86400,
+                        observation_span_seconds / 86400,
                         len(occupied_intervals),
                     )
                 else:
@@ -480,15 +654,15 @@ class PriorAnalyzer:
             try:
                 time_priors, data_points_per_slot = self.calculate_time_priors(
                     occupied_intervals,
-                    first_interval_start,
-                    actual_period_end,
+                    period_start,
+                    now,
                 )
                 if time_priors:
                     success = self.db.save_time_priors(
                         area_name=self.area_name,
                         time_priors=time_priors,
-                        data_period_start=first_interval_start,
-                        data_period_end=actual_period_end,
+                        data_period_start=period_start,
+                        data_period_end=now,
                         data_points_per_slot=data_points_per_slot,
                     )
                     if success:
@@ -518,11 +692,6 @@ class PriorAnalyzer:
             _LOGGER.error(
                 "Failed to calculate prior for area %s: %s", self.area_name, e
             )
-
-    def _get_entity_ids_by_type(self, input_type: InputType) -> list[str]:
-        """Get entity IDs for a specific input type in this area."""
-        entities = self.area.entities.get_entities_by_input_type(input_type)
-        return list(entities.keys())
 
     def calculate_time_priors(
         self,
@@ -663,6 +832,20 @@ async def ensure_occupied_intervals_cache(
     This function checks cache validity and populates it from raw intervals
     if needed. This ensures the cache exists before interval aggregation
     deletes raw intervals older than the retention period.
+
+    Known follow-up (#520, Fix 4, deliberately deferred out of that PR):
+    ``OccupiedIntervalsCache`` currently has no read-path consumers anywhere
+    in the codebase — prior calculation and everything else that needs
+    occupied intervals queries the raw ``Intervals`` table directly (see
+    ``PriorAnalyzer.get_occupied_intervals`` / ``db.queries.get_occupied_intervals``).
+    That means this step spends a full pipeline cycle maintaining a table
+    nothing reads, and (because it skips saving when intervals are empty)
+    it silently goes stale in lockstep with the exact "no occupied data"
+    condition it might otherwise have helped diagnose, rather than
+    surfacing it. Either wire this cache in as a real fast-path/cross-check
+    for prior calculation, or remove the step and the table's population
+    code — left as a follow-up rather than a destructive schema change
+    bundled into the #520 fix.
 
     Args:
         coordinator: The coordinator instance containing areas and database

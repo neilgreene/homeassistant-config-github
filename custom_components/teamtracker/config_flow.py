@@ -9,7 +9,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
@@ -19,78 +19,124 @@ from .const import (
     CONF_LEAGUE_PATH,
     CONF_SPORT_PATH,
     CONF_TEAM_ID,
-    DEFAULT_CONFERENCE_ID,
-    DEFAULT_LEAGUE,
-    DEFAULT_NAME,
     DOMAIN,
-    LEAGUE_MAP,
+    INDIVIDUAL_SPORTS,
+    NATIVE_LEAGUES,
 )
+from .provider_base import BaseSportProvider
+from .provider_factory import get_provider
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _get_schema(
-    hass: HomeAssistant,
-    user_input: dict[str, Any] | None,
-    default_dict: dict[str, Any],
-) -> vol.Schema:
-    """Gets a schema using the default_dict as a backup."""
+# Sport groups: key → (display_name, {league_id: display_label})
+_SPORT_GROUPS: dict[str, tuple[str, dict[str, str]]] = {
+    "australian-football": ("Australian Football", {
+        "AFL": "AFL",
+    }),
+    "baseball": ("Baseball", {
+        "MLB": "MLB",
+    }),
+    "basketball": ("Basketball", {
+        "NBA": "NBA",
+        "NCAAM": "NCAA Men's Basketball",
+        "NCAAW": "NCAA Women's Basketball",
+        "WNBA": "WNBA",
+    }),
+    "football": ("Football", {
+        "NCAAF": "NCAA Football",
+        "NFL": "NFL",
+        "XFL": "XFL",
+    }),
+    "golf": ("Golf", {
+        "PGA": "PGA Tour",
+    }),
+    "hockey": ("Hockey", {
+        "NHL": "NHL",
+    }),
+    "mma": ("MMA", {
+        "UFC": "UFC",
+    }),
+    "racing": ("Racing", {
+        "F1": "Formula 1",
+        "IRL": "IndyCar",
+        "NASCAR": "NASCAR Cup Series",
+    }),
+    "soccer-us": ("Soccer (U.S.)", {
+        "MLS": "MLS",
+        "NWSL": "NWSL",
+    }),
+    "soccer-intl": ("Soccer (International)", {
+        "BUND": "Bundesliga",
+        "CL": "Champions League",
+        "CLA": "Copa Libertadores",
+        "EPL": "Premier League",
+        "LIGA": "La Liga",
+        "LIG1": "Ligue 1",
+        "SERA": "Serie A",
+        "WC": "World Cup",
+        "WWC": "Women's World Cup",
+    }),
+    "tennis": ("Tennis", {
+        "ATP": "ATP",
+        "WTA": "WTA",
+    }),
+    "volleyball": ("Volleyball", {
+        "NCAAVB": "NCAA Men's Volleyball",
+        "NCAAVBW": "NCAA Women's Volleyball",
+    }),
+}
 
-    if user_input is None:
-        user_input = {}
-
-    def _get_default(key: str, fallback_default: Any = None) -> Any:
-        """Gets default value for key."""
-        return user_input.get(key, default_dict.get(key, fallback_default))
-
-    return vol.Schema(
-        {
-            vol.Required(CONF_LEAGUE_ID, default=_get_default(CONF_LEAGUE_ID)): vol.In(
-                {
-                    **{k: k for k in sorted(LEAGUE_MAP)},
-                    "XXX": "Custom: Specify sport and league path",
-                }
-            ),
-            vol.Required(CONF_TEAM_ID, default=_get_default(CONF_TEAM_ID)): cv.string,
-            vol.Optional(CONF_NAME, default=_get_default(CONF_NAME)): cv.string,
-            vol.Optional(
-                CONF_CONFERENCE_ID, default=_get_default(CONF_CONFERENCE_ID)
-            ): cv.string,
-        }
-    )
+SPORT_OPTIONS: dict[str, str] = {
+    "XXX": "Custom API",
+    **{k: v[0] for k, v in _SPORT_GROUPS.items()}
+}
 
 
 def _get_path_schema(
-    hass: HomeAssistant, 
-    user_input: dict[str, Any] | None, 
-    default_dict: dict[str, Any]
+    user_input: dict[str, Any] | None,
+    default_dict: dict[str, Any],
 ) -> vol.Schema:
-    """Gets a schema using the default_dict as a backup."""
+    """Schema for custom sport/league path step."""
     if user_input is None:
         user_input = {}
 
     def _get_default(key: str) -> Any:
-        """Gets default value for key."""
-        return user_input.get(key, default_dict.get(key))
+        return user_input.get(key, default_dict.get(key, ""))
 
     return vol.Schema(
         {
             vol.Required(CONF_SPORT_PATH, default=_get_default(CONF_SPORT_PATH)): str,
             vol.Required(CONF_LEAGUE_PATH, default=_get_default(CONF_LEAGUE_PATH)): str,
+            vol.Required(CONF_TEAM_ID, default=_get_default(CONF_TEAM_ID)): cv.string,
+            vol.Optional(CONF_CONFERENCE_ID, default=_get_default(CONF_CONFERENCE_ID)): cv.string,
+            vol.Optional(CONF_NAME, default=_get_default(CONF_NAME)): cv.string,
         }
     )
 
 
-class TeamTrackerScoresFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
+class TeamTrackerScoresFlowHandler(config_entries.ConfigFlow, domain=DOMAIN): # type: ignore[call-arg]
     """Config flow for TeamTracker."""
 
     VERSION = 3
 
     def __init__(self) -> None:
         """Initialize."""
-        self._data: dict[str, Any] = {}
+        self._sport_key: str = ""
+        self._league_id: str = ""
+        self._team_name: str = ""
+        self._sport_path: str = ""
+        self._league_path: str = ""
+        self._all_teams: list[dict] = []
+        self._search_results: dict[str, str] = {}
+        self._team_meta: dict[str, dict] = {}
         self._errors: dict[str, str] = {}
+        self._entry_data: dict[str, Any] = {}
+        self._provider: BaseSportProvider | None= None
 
+    # ------------------------------------------------------------------ #
+    #  Step 1: choose sport group                                         #
+    # ------------------------------------------------------------------ #
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
@@ -98,64 +144,308 @@ class TeamTrackerScoresFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._errors = {}
 
         if user_input is not None:
-            league_id = user_input[CONF_LEAGUE_ID].upper()
-            if league_id == "XXX":
-                self._data.update(user_input)
-                return await self.async_step_path()
-            if paths := LEAGUE_MAP.get(league_id):
-                user_input.update(paths)
-                self._data.update(user_input)
-                return self.async_create_entry(
-                    title=self._data[CONF_NAME], data=self._data
-                )
-            self._errors["base"] = "league"
-        return await self._show_config_form(user_input)
+            sport_key = user_input["sport_key"]
+            if sport_key == "XXX":
+                return await self.async_step_custom_api()
+            self._sport_key = sport_key
+            leagues = _SPORT_GROUPS[sport_key][1]
+            if len(leagues) == 1:
+                # Only one league for this sport — skip league step
+                self._league_id = next(iter(leagues))
+                self._sport_path = NATIVE_LEAGUES.get(self._league_id, {}).get(CONF_SPORT_PATH, "")
+                self._league_path = NATIVE_LEAGUES.get(self._league_id, {}).get(CONF_LEAGUE_PATH, "")
 
-    async def async_step_path(
+                return await self.async_step_search()
+            return await self.async_step_league()
+
+        schema = vol.Schema(
+            {vol.Required("sport_key"): vol.In(SPORT_OPTIONS)}
+        )
+        return self.async_show_form(
+            step_id="user",
+            data_schema=schema,
+            errors=self._errors,
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Step 2a: Set Up Custom API (sport_key = XXX)                      #
+    # ------------------------------------------------------------------ #
+    async def async_step_custom_api(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         """Handle custom sport/league path configuration."""
         self._errors = {}
 
         if user_input is not None:
-            self._data.update(user_input)
-            return self.async_create_entry(title=self._data[CONF_NAME], data=self._data)
-        return await self._show_path_form(user_input)
+            self._league_id = "XXX"
+            self._sport_path = user_input[CONF_SPORT_PATH]
+            self._league_path = user_input[CONF_LEAGUE_PATH]
+            return await self.async_step_search()
 
-    async def _show_config_form(
-        self, user_input: dict[str, Any] | None
-    ) -> config_entries.FlowResult:
-        """Show the configuration form to edit location data."""
-
-        # Defaults
-        defaults = {
-            CONF_LEAGUE_ID: DEFAULT_LEAGUE,
-            CONF_NAME: DEFAULT_NAME,
-            CONF_TEAM_ID: "",
-            CONF_CONFERENCE_ID: DEFAULT_CONFERENCE_ID,
-        }
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SPORT_PATH, default=""): cv.string,
+                vol.Required(CONF_LEAGUE_PATH, default=""): cv.string,
+            }
+        )
         return self.async_show_form(
-            step_id="user",
-            data_schema=_get_schema(self.hass, user_input, defaults),
+            step_id="custom_api",
+            data_schema=schema,
             errors=self._errors,
         )
 
-    async def _show_path_form(
-        self, user_input: dict[str, Any] | None
-    ) -> config_entries.FlowResult:
-        """Show the path form to edit path data."""
 
-        # Defaults
-        defaults = {
-            CONF_SPORT_PATH: "",
-            CONF_LEAGUE_PATH: "",
-        }
+    # ------------------------------------------------------------------ #
+    #  Step 2b: choose league within sport                               #
+    # ------------------------------------------------------------------ #
+    async def async_step_league(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle league selection within the chosen sport."""
+        self._errors = {}
+
+        if user_input is not None:
+            self._league_id = user_input[CONF_LEAGUE_ID]
+            self._sport_path = NATIVE_LEAGUES.get(self._league_id, {}).get(CONF_SPORT_PATH, "")
+            self._league_path = NATIVE_LEAGUES.get(self._league_id, {}).get(CONF_LEAGUE_PATH, "")
+
+            return await self.async_step_search()
+
+        league_options = _SPORT_GROUPS[self._sport_key][1]
+        sport_name = _SPORT_GROUPS[self._sport_key][0]
+        schema = vol.Schema(
+            {vol.Required(CONF_LEAGUE_ID): vol.In(league_options)}
+        )
         return self.async_show_form(
-            step_id="path",
-            data_schema=_get_path_schema(self.hass, user_input, defaults),
+            step_id="league",
+            data_schema=schema,
             errors=self._errors,
+            description_placeholders={"sport_name": sport_name},
         )
 
+    # ------------------------------------------------------------------ #
+    #  Step 3: search team (ESPN link always correct here)                #
+    # ------------------------------------------------------------------ #
+    async def async_step_search(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle team search step."""
+        self._errors = {}
+
+        # Individual sports (golf, mma, tennis) have athletes, not teams —
+        # the ESPN teams API returns nothing useful, so skip straight to manual.
+        if user_input is None and self._sport_path in INDIVIDUAL_SPORTS:
+            return await self.async_step_manual_athlete(user_input=None)
+
+        if user_input is not None:
+            provider = get_provider(self._sport_path, self._league_path)
+            self._provider = provider
+            search_term = user_input.get("search_team", "").strip().lower()
+            if search_term:
+                response = await provider.async_get_team_data(self.hass, self._sport_path, self._league_path)
+                self._all_teams = response["data"]
+                if not self._all_teams:
+                    self._errors["base"] = "cannot_fetch_teams"
+                else:
+                    filtered = [
+                        t for t in self._all_teams
+                        if search_term in t["displayName"].lower()
+                        or search_term in t["abbreviation"].lower()
+                        or search_term in t["location"].lower()
+                        or search_term in t["id"]
+                    ]
+                    if not filtered:
+                        self._errors["search_team"] = "no_teams_found"
+                    else:
+                        self._search_results = {
+                            t["id"]: f"{t['displayName']} ({t['abbreviation']} - {t['id']})"
+                            for t in filtered
+                        }
+                        self._team_meta = {t["id"]: t for t in filtered}
+                        return await self.async_step_select_team()
+            else:
+                return await self.async_step_manual_team()
+
+        schema = vol.Schema(
+            {vol.Optional("search_team", default=""): str}
+        )
+        sport_name = _SPORT_GROUPS.get(self._sport_key, ("",))[0]
+        league_name = _SPORT_GROUPS.get(self._sport_key, ("", {}))[1].get(self._league_id, "")
+        return self.async_show_form(
+            step_id="search",
+            data_schema=schema,
+            errors=self._errors,
+            description_placeholders={
+                "league_id": self._league_id,
+                "league_name": league_name,
+                "sport_name": sport_name,
+            },
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Step 4a: pick from search results                                  #
+    # ------------------------------------------------------------------ #
+    async def async_step_select_team(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle team selection from search results."""
+
+        if user_input is not None:
+            t_id = user_input["team_selection"]
+            meta = self._team_meta.get(t_id, {})
+
+            self._team_name = meta.get("displayName", t_id)
+            name = user_input.get(CONF_NAME, "").strip() or meta.get("displayName", t_id)
+            team_id = meta.get("id", t_id)
+
+            self._entry_data = {
+                    CONF_NAME:          name,
+                    CONF_LEAGUE_ID:     self._league_id,
+                    CONF_TEAM_ID:       team_id,
+                    CONF_SPORT_PATH:    self._sport_path,
+                    CONF_LEAGUE_PATH:   self._league_path,
+                }
+            if "college" in self._league_path and self._provider:
+                conf_id = await self._provider.async_get_team_conference_id(self.hass, self._sport_path, self._league_path, team_id)
+                self._entry_data[CONF_CONFERENCE_ID] = conf_id
+
+            return await self.async_step_finalize()
+
+        sport_name = _SPORT_GROUPS.get(self._sport_key, ("",))[0]
+        league_name = _SPORT_GROUPS.get(self._sport_key, ("", {}))[1].get(self._league_id, "")
+        schema = vol.Schema({
+            vol.Required("team_selection"): vol.In(self._search_results),
+        })
+        return self.async_show_form(
+            step_id="select_team",
+            data_schema=schema,
+            errors={},
+            description_placeholders={
+                "league_id": self._league_id,
+                "sport_name": sport_name,
+                "league_name": league_name,
+            },
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Step 4b: manual team_id entry (no search / fallback)              #
+    # ------------------------------------------------------------------ #
+    async def async_step_manual_team(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle manual team ID entry."""
+
+        if user_input is not None:
+            sport_path = self._sport_path
+            league_path = self._league_path
+            self._team_name = user_input[CONF_TEAM_ID]
+            name = user_input.get(CONF_NAME) or user_input[CONF_TEAM_ID]
+            team_id = user_input[CONF_TEAM_ID]
+            self._entry_data = {
+                CONF_NAME:          name,
+                CONF_LEAGUE_ID:     self._league_id,
+                CONF_TEAM_ID:       team_id,
+                CONF_SPORT_PATH:    sport_path,
+                CONF_LEAGUE_PATH:   league_path,
+            }
+            if "college" in league_path and self._provider:
+                conf_id = await self._provider.async_get_team_conference_id(self.hass, sport_path, league_path, team_id)
+                self._entry_data[CONF_CONFERENCE_ID] = conf_id
+
+            return await self.async_step_finalize()
+
+        sport_name = _SPORT_GROUPS.get(self._sport_key, ("",))[0]
+        league_name = _SPORT_GROUPS.get(self._sport_key, ("", {}))[1].get(self._league_id, "")
+
+        schema_dict = {
+            vol.Required(CONF_TEAM_ID): cv.string,
+        }
+
+        return self.async_show_form(
+            step_id="manual_team",
+            data_schema=vol.Schema(schema_dict),
+            errors={},
+            description_placeholders={
+                "league_id": self._league_id,
+                "sport_name": sport_name,
+                "league_name": league_name,
+            },
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Step 4c: manual athlete entry (no search / fallback)              #
+    # ------------------------------------------------------------------ #
+    async def async_step_manual_athlete(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle manual team ID entry."""
+        if user_input is not None:
+            name = user_input.get(CONF_NAME) or user_input[CONF_TEAM_ID]
+            self._team_name = user_input[CONF_TEAM_ID]
+            self._entry_data = {
+                CONF_NAME:          name,
+                CONF_LEAGUE_ID:     self._league_id,
+                CONF_TEAM_ID:       user_input[CONF_TEAM_ID],
+                CONF_SPORT_PATH:    self._sport_path,
+                CONF_LEAGUE_PATH:   self._league_path,
+            }
+
+            return await self.async_step_finalize()
+
+        sport_name = _SPORT_GROUPS.get(self._sport_key, ("",))[0]
+        league_name = _SPORT_GROUPS.get(self._sport_key, ("", {}))[1].get(self._league_id, "")
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_TEAM_ID): cv.string,
+            }
+        )
+        return self.async_show_form(
+            step_id="manual_athlete",
+            data_schema=schema,
+            errors={},
+            description_placeholders={
+                "league_id": self._league_id,
+                "sport_name": sport_name,
+                "league_name": league_name,
+            },
+        )
+
+
+    # ------------------------------------------------------------------ #
+    #  Step 5: Finalize the configuration and choose a name              #
+    # ------------------------------------------------------------------ #
+    async def async_step_finalize(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Step 5: Finalize the configuration and choose a name."""
+        if user_input is not None:
+            name = user_input[CONF_NAME]
+            self._entry_data[CONF_NAME] = name
+            
+            return self.async_create_entry(
+                title=name,
+                data=self._entry_data,
+            )
+
+        default_name = f"{self._league_id} - {self._team_name}"
+        # Use the league_id and team_name as the default name
+        schema = vol.Schema({
+            vol.Required(CONF_NAME, default=default_name): cv.string,
+        })
+
+        return self.async_show_form(
+            step_id="finalize",
+            data_schema=schema,
+            description_placeholders={
+                "team_name": self._team_name,
+                "league_name": self._league_id,
+            },
+        )
+
+
+    # ------------------------------------------------------------------ #
+    #  Options flow (reconfigure existing entry)                          #
+    # ------------------------------------------------------------------ #
     @staticmethod
     @callback
     def async_get_options_flow(
@@ -178,16 +468,9 @@ class TeamTrackerScoresOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         """Manage options."""
-
         if user_input is not None:
             self._options.update(user_input)
             return self.async_create_entry(title="", data=self._options)
-        return await self._show_options_form(user_input)
-
-    async def _show_options_form(
-        self, user_input: dict[str, Any] | None
-    ) -> config_entries.FlowResult:
-        """Show the options form to edit location data."""
 
         lang = None
         if (
@@ -206,7 +489,6 @@ class TeamTrackerScoresOptionsFlow(config_entries.OptionsFlow):
                 ): cv.string,
             }
         )
-
         return self.async_show_form(
             step_id="init",
             data_schema=options_schema,

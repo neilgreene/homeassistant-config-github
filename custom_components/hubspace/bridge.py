@@ -1,9 +1,10 @@
 """Bridge knows how to interact with aioafero to update data."""
 
 import asyncio
+from collections.abc import Callable
 import logging
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from aioafero import EventType, InvalidAuth, InvalidResponse, TemperatureUnit
 from aioafero.v1 import AferoBridgeV1
@@ -11,12 +12,12 @@ import aiohttp
 from aiohttp import client_exceptions
 from homeassistant import core
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry
-from homeassistant.const import CONF_PASSWORD, CONF_TIMEOUT, CONF_TOKEN, CONF_USERNAME
+from homeassistant.const import CONF_TIMEOUT, CONF_USERNAME
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import aiohttp_client
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
-from .const import CONF_CLIENT, DOMAIN, PLATFORMS, POLLING_TIME_STR
+from .const import CONF_CLIENT, CONF_REFRESH_TOKEN, DOMAIN, PLATFORMS, POLLING_TIME_STR
 from .device import async_setup_devices
 
 
@@ -50,6 +51,9 @@ class HubspaceBridge:
         self.config_entry = config_entry
         self.hass = hass
         self.authorized = False
+        # light id -> color-mode / power state before night-light was enabled
+        self.night_light_previous_modes: dict[str, str] = {}
+        self.night_light_was_on: dict[str, bool] = {}
         # Jobs to be executed when API is reset.
         self.reset_jobs: list[core.CALLBACK_TYPE] = []
         # self.sensor_manager: SensorManager | None = None
@@ -64,9 +68,8 @@ class HubspaceBridge:
         # store actual api connection to bridge as api
         self.api = AferoBridgeV1(
             self.config_entry.data[CONF_USERNAME],
-            self.config_entry.data[CONF_PASSWORD],
-            refresh_token=self.config_entry.data[CONF_TOKEN],
-            session=aiohttp_client.async_get_clientsession(hass),
+            self.config_entry.data[CONF_REFRESH_TOKEN],
+            aiohttp_client.async_get_clientsession(hass),
             polling_interval=polling_interval,
             afero_client=self.config_entry.data[CONF_CLIENT],
             temperature_unit=temp_unit,
@@ -83,7 +86,7 @@ class HubspaceBridge:
         setup_ok = False
 
         # Dev mocking
-        # self.api.fetch_data = mock_get_data("security-system-raw.json")
+        # self.api.fetch_discovery_data = mock_get_data("dual-channel-lights-raw.json")
 
         try:
             async with asyncio.timeout(self.config_entry.options[CONF_TIMEOUT]):
@@ -154,6 +157,11 @@ class HubspaceBridge:
         unload_success = await self.hass.config_entries.async_unload_platforms(
             self.config_entry, PLATFORMS
         )
+
+        try:
+            await self.api.close()
+        except Exception:
+            self.logger.exception("Error closing Hubspace API connection")
 
         if unload_success:
             self.hass.data[DOMAIN].pop(self.config_entry.entry_id)

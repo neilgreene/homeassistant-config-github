@@ -24,8 +24,10 @@ from .const import (
     CONF_ATTR_ACTIVITY_ID,
     CONF_ATTR_ACTIVITY_URL,
     CONF_ATTR_COMMUTE,
+    CONF_ATTR_KOM_SEGMENTS,
     CONF_ATTR_LOCATION,
     CONF_ATTR_POLYLINE,
+    CONF_ATTR_PR_SEGMENTS,
     CONF_ATTR_PRIVATE,
     CONF_ATTR_SPORT_TYPE,
     CONF_ATTR_START_LATLONG,
@@ -88,6 +90,7 @@ from .const import (
     generate_sensor_id,
     generate_sensor_name,
     get_athlete_name_from_title,
+    get_gear_type_label,
     normalize_activity_type,
 )
 from .coordinator import StravaDataUpdateCoordinator
@@ -280,18 +283,21 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     # Create gear sensors if enabled
     if gear_enabled:
         gear_data = coordinator.data.get("gear") if coordinator.data else []
-        for gear_index, _gear_item in enumerate(gear_data):
+        for gear_item in gear_data:
+            gear_id = str(gear_item.get("id", ""))
+            if not gear_id:
+                continue
             entries.append(
                 StravaGearNameSensor(
                     coordinator,
-                    gear_index=gear_index,
+                    gear_id=gear_id,
                     athlete_id=athlete_id,
                 )
             )
             entries.append(
                 StravaGearDistanceSensor(
                     coordinator,
-                    gear_index=gear_index,
+                    gear_id=gear_id,
                     athlete_id=athlete_id,
                 )
             )
@@ -302,6 +308,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 class StravaSummaryStatsSensor(CoordinatorEntity, SensorEntity):
     """A sensor for Strava summary statistics."""
 
+    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.TOTAL
 
     def __init__(
@@ -504,12 +511,12 @@ class StravaSummaryStatsSensor(CoordinatorEntity, SensorEntity):
             activity_type = parts[-2]
             period = parts[0]
             formatted_sensor = self._metric_key.replace("_", " ").title()
-            return f"Strava {self._athlete_name} Stats {period.title()} {activity_type.title()} {formatted_sensor}"
+            return f"{period.title()} {activity_type.title()} {formatted_sensor}"
         elif self._api_key in ["biggest_ride_distance", "biggest_climb_elevation_gain"]:
             formatted_sensor = self._metric_key.replace("_", " ").title()
-            return f"Strava {self._athlete_name} Stats {formatted_sensor}"
+            return formatted_sensor
         else:
-            return f"Strava {self._athlete_name} Stats {self._display_name}"
+            return self._display_name
 
     @property
     def extra_state_attributes(self):
@@ -571,6 +578,7 @@ class StravaSummaryStatsSensor(CoordinatorEntity, SensorEntity):
 class StravaActivityTypeSensor(CoordinatorEntity, SensorEntity):
     """A sensor for specific activity type with latest activity data."""
 
+    _attr_has_entity_name = True
     _attr_state_class = None
     _attr_device_class = None
 
@@ -640,8 +648,12 @@ class StravaActivityTypeSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def name(self):
-        """Return the name of the sensor."""
-        return f"Strava {self._athlete_name} {format_activity_type_display(self._activity_type)}"
+        """Return the name of the sensor.
+
+        None makes this the device's primary entity: HA uses the device
+        name alone instead of concatenating an entity name onto it.
+        """
+        return None
 
     @property
     def extra_state_attributes(self):
@@ -661,6 +673,8 @@ class StravaActivityTypeSensor(CoordinatorEntity, SensorEntity):
             CONF_ATTR_PRIVATE: activity.get(CONF_ATTR_PRIVATE),
             CONF_ATTR_ACTIVITY_URL: f"{STRAVA_ACTIVITY_BASE_URL}{activity_id}",
             CONF_ATTR_POLYLINE: activity.get(CONF_ATTR_POLYLINE),
+            CONF_ATTR_PR_SEGMENTS: activity.get(CONF_ATTR_PR_SEGMENTS, []),
+            CONF_ATTR_KOM_SEGMENTS: activity.get(CONF_ATTR_KOM_SEGMENTS, []),
         }
 
         # Add starting coordinates if available
@@ -671,32 +685,29 @@ class StravaActivityTypeSensor(CoordinatorEntity, SensorEntity):
         return attrs
 
     def _calculate_pace(self, activity):
-        """Calculate pace for the activity."""
+        """Calculate pace for the activity, returning decimal minutes."""
         distance = activity.get(CONF_SENSOR_DISTANCE, 0)
         moving_time = activity.get(CONF_SENSOR_MOVING_TIME, 0)
 
         if distance == 0 or moving_time == 0:
-            return "0:00"
+            return 0.0
 
         pace = moving_time / (distance / 1000)  # seconds per km
-        is_metric = self._is_metric()
-
-        if not is_metric:
-            pace = DistanceConverter.convert(
-                pace, UnitOfLength.KILOMETERS, UnitOfLength.MILES
+        if not self._is_metric():
+            # pace is s/km; multiply by km-per-mile to get s/mile
+            pace = pace * DistanceConverter.convert(
+                1, UnitOfLength.MILES, UnitOfLength.KILOMETERS
             )
 
-        minutes = int(pace // 60)
-        seconds = int(pace % 60)
-        unit = (
-            UNIT_PACE_MINUTES_PER_KILOMETER if is_metric else UNIT_PACE_MINUTES_PER_MILE
-        )
-        return f"{minutes}:{seconds:02} {unit}"
+        return round(pace / 60, 3)  # decimal minutes
 
     def _calculate_speed(self, activity):
         """Calculate speed for the activity."""
         distance = activity.get(CONF_SENSOR_DISTANCE, 0)
-        moving_time = activity.get(CONF_SENSOR_MOVING_TIME, 1)
+        moving_time = activity.get(CONF_SENSOR_MOVING_TIME, 0)
+
+        if distance == 0 or moving_time == 0:
+            return 0.0
 
         speed = (distance / 1000) / (moving_time / 3600)  # km/h
         is_metric = self._is_metric()
@@ -734,6 +745,8 @@ class StravaActivityTypeSensor(CoordinatorEntity, SensorEntity):
 
 class StravaActivityAttributeSensor(CoordinatorEntity, SensorEntity):
     """Base class for individual activity attribute sensors."""
+
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -809,11 +822,7 @@ class StravaActivityAttributeSensor(CoordinatorEntity, SensorEntity):
     @property
     def name(self):
         """Return the name of the sensor."""
-        return generate_sensor_name(
-            self._athlete_name,
-            format_activity_type_display(self._activity_type),
-            self._attribute_type,
-        )
+        return generate_sensor_name(self._attribute_type)
 
     def _get_value_or_unavailable(self, value):
         """Return the value or None if None, blank, or -1."""
@@ -1082,6 +1091,13 @@ class StravaActivityMetricSensor(StravaActivityAttributeSensor):
     @property
     def native_unit_of_measurement(self):
         """Return the unit of measurement."""
+        if self._metric_type == CONF_SENSOR_PACE:
+            return (
+                UNIT_PACE_MINUTES_PER_KILOMETER
+                if self._is_metric()
+                else UNIT_PACE_MINUTES_PER_MILE
+            )
+
         config = CONF_ATTRIBUTE_SENSORS.get(self._metric_type, {})
         unit = config.get("unit")
 
@@ -1119,32 +1135,29 @@ class StravaActivityMetricSensor(StravaActivityAttributeSensor):
         return unit
 
     def _calculate_pace(self, activity):
-        """Calculate pace for the activity."""
+        """Calculate pace for the activity, returning decimal minutes."""
         distance = activity.get(CONF_SENSOR_DISTANCE, 0)
         moving_time = activity.get(CONF_SENSOR_MOVING_TIME, 0)
 
         if distance == 0 or moving_time == 0:
-            return "0:00"
+            return 0.0
 
         pace = moving_time / (distance / 1000)  # seconds per km
-        is_metric = self._is_metric()
-
-        if not is_metric:
-            pace = DistanceConverter.convert(
-                pace, UnitOfLength.KILOMETERS, UnitOfLength.MILES
+        if not self._is_metric():
+            # pace is s/km; multiply by km-per-mile to get s/mile
+            pace = pace * DistanceConverter.convert(
+                1, UnitOfLength.MILES, UnitOfLength.KILOMETERS
             )
 
-        minutes = int(pace // 60)
-        seconds = int(pace % 60)
-        unit = (
-            UNIT_PACE_MINUTES_PER_KILOMETER if is_metric else UNIT_PACE_MINUTES_PER_MILE
-        )
-        return f"{minutes}:{seconds:02} {unit}"
+        return round(pace / 60, 3)  # decimal minutes
 
     def _calculate_speed(self, activity):
         """Calculate speed for the activity."""
         distance = activity.get(CONF_SENSOR_DISTANCE, 0)
-        moving_time = activity.get(CONF_SENSOR_MOVING_TIME, 1)
+        moving_time = activity.get(CONF_SENSOR_MOVING_TIME, 0)
+
+        if distance == 0 or moving_time == 0:
+            return 0.0
 
         speed = (distance / 1000) / (moving_time / 3600)  # km/h
         is_metric = self._is_metric()
@@ -1179,12 +1192,27 @@ class StravaActivityMetricSensor(StravaActivityAttributeSensor):
                     time_value
                 )
 
+        # Add formatted pace string for pace sensors
+        if self._metric_type == CONF_SENSOR_PACE:
+            pace_val = self.native_value
+            if pace_val:
+                mins = int(pace_val)
+                secs = int(round((pace_val - mins) * 60))
+                unit = (
+                    UNIT_PACE_MINUTES_PER_KILOMETER
+                    if self._is_metric()
+                    else UNIT_PACE_MINUTES_PER_MILE
+                )
+                attributes["formatted_pace"] = f"{mins}:{secs:02d} {unit}"
+                attributes["pace"] = f"{mins}:{secs:02d}"
+
         return attributes
 
 
 class StravaRecentActivitySensor(CoordinatorEntity, SensorEntity):
     """A sensor for the most recent activity across all activity types."""
 
+    _attr_has_entity_name = True
     _attr_state_class = None
     _attr_device_class = None
 
@@ -1260,10 +1288,12 @@ class StravaRecentActivitySensor(CoordinatorEntity, SensorEntity):
 
     @property
     def name(self):
-        """Return the name of the sensor."""
-        return generate_recent_activity_device_name(
-            self._athlete_name, self._activity_index
-        )
+        """Return the name of the sensor.
+
+        None makes this the device's primary entity: HA uses the device
+        name alone instead of concatenating an entity name onto it.
+        """
+        return None
 
     @property
     def extra_state_attributes(self):
@@ -1282,6 +1312,8 @@ class StravaRecentActivitySensor(CoordinatorEntity, SensorEntity):
             CONF_ATTR_PRIVATE: activity.get(CONF_ATTR_PRIVATE),
             CONF_ATTR_ACTIVITY_URL: f"{STRAVA_ACTIVITY_BASE_URL}{activity_id}",
             CONF_ATTR_POLYLINE: activity.get(CONF_ATTR_POLYLINE),
+            CONF_ATTR_PR_SEGMENTS: activity.get(CONF_ATTR_PR_SEGMENTS, []),
+            CONF_ATTR_KOM_SEGMENTS: activity.get(CONF_ATTR_KOM_SEGMENTS, []),
         }
 
         if start_latlng := activity.get(CONF_ATTR_START_LATLONG):
@@ -1293,6 +1325,8 @@ class StravaRecentActivitySensor(CoordinatorEntity, SensorEntity):
 
 class StravaRecentActivityAttributeSensor(CoordinatorEntity, SensorEntity):
     """Base class for individual recent activity attribute sensors."""
+
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -1367,11 +1401,7 @@ class StravaRecentActivityAttributeSensor(CoordinatorEntity, SensorEntity):
     @property
     def name(self):
         """Return the name of the sensor."""
-        return generate_recent_activity_sensor_name(
-            self._athlete_name,
-            self._attribute_type,
-            self._activity_index,
-        )
+        return generate_recent_activity_sensor_name(self._attribute_type)
 
     def _get_value_or_unavailable(self, value):
         """Return the value or None if None, blank, or -1."""
@@ -1607,6 +1637,13 @@ class StravaRecentActivityMetricSensor(StravaRecentActivityAttributeSensor):
     @property
     def native_unit_of_measurement(self):
         """Return the unit of measurement."""
+        if self._metric_type == CONF_SENSOR_PACE:
+            return (
+                UNIT_PACE_MINUTES_PER_KILOMETER
+                if self._is_metric()
+                else UNIT_PACE_MINUTES_PER_MILE
+            )
+
         config = CONF_ATTRIBUTE_SENSORS.get(self._metric_type, {})
         unit = config.get("unit")
 
@@ -1643,32 +1680,29 @@ class StravaRecentActivityMetricSensor(StravaRecentActivityAttributeSensor):
         return unit
 
     def _calculate_pace(self, activity):
-        """Calculate pace for the activity."""
+        """Calculate pace for the activity, returning decimal minutes."""
         distance = activity.get(CONF_SENSOR_DISTANCE, 0)
         moving_time = activity.get(CONF_SENSOR_MOVING_TIME, 0)
 
         if distance == 0 or moving_time == 0:
-            return "0:00"
+            return 0.0
 
-        pace = moving_time / (distance / 1000)
-        is_metric = self._is_metric()
-
-        if not is_metric:
-            pace = DistanceConverter.convert(
-                pace, UnitOfLength.KILOMETERS, UnitOfLength.MILES
+        pace = moving_time / (distance / 1000)  # seconds per km
+        if not self._is_metric():
+            # pace is s/km; multiply by km-per-mile to get s/mile
+            pace = pace * DistanceConverter.convert(
+                1, UnitOfLength.MILES, UnitOfLength.KILOMETERS
             )
 
-        minutes = int(pace // 60)
-        seconds = int(pace % 60)
-        unit = (
-            UNIT_PACE_MINUTES_PER_KILOMETER if is_metric else UNIT_PACE_MINUTES_PER_MILE
-        )
-        return f"{minutes}:{seconds:02} {unit}"
+        return round(pace / 60, 3)  # decimal minutes
 
     def _calculate_speed(self, activity):
         """Calculate speed for the activity."""
         distance = activity.get(CONF_SENSOR_DISTANCE, 0)
-        moving_time = activity.get(CONF_SENSOR_MOVING_TIME, 1)
+        moving_time = activity.get(CONF_SENSOR_MOVING_TIME, 0)
+
+        if distance == 0 or moving_time == 0:
+            return 0.0
 
         speed = (distance / 1000) / (moving_time / 3600)
         is_metric = self._is_metric()
@@ -1703,11 +1737,31 @@ class StravaRecentActivityMetricSensor(StravaRecentActivityAttributeSensor):
                     time_value
                 )
 
+        # Add formatted pace string for pace sensors
+        if self._metric_type == CONF_SENSOR_PACE:
+            pace_val = self.native_value
+            if pace_val:
+                mins = int(pace_val)
+                secs = int(round((pace_val - mins) * 60))
+                unit = (
+                    UNIT_PACE_MINUTES_PER_KILOMETER
+                    if self._is_metric()
+                    else UNIT_PACE_MINUTES_PER_MILE
+                )
+                attributes["formatted_pace"] = f"{mins}:{secs:02d} {unit}"
+                attributes["pace"] = f"{mins}:{secs:02d}"
+
         return attributes
 
 
 class StravaGearNameSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for gear name with attributes."""
+    """Sensor for gear name with attributes.
+
+    has_entity_name is intentionally left off (defaults to False): the
+    device is named after the equipment itself (e.g. "ASICS GT-2000 10 US12
+    Wide"), so composing "{device name} {entity name}" would be redundant.
+    The bare entity name ("Shoes"/"Bike") is used as-is instead.
+    """
 
     _attr_state_class = None
     _attr_device_class = None
@@ -1715,28 +1769,28 @@ class StravaGearNameSensor(CoordinatorEntity, SensorEntity):
     def __init__(
         self,
         coordinator: StravaDataUpdateCoordinator,
-        gear_index: int,
+        gear_id: str,
         athlete_id: str,
     ):
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self._gear_index = gear_index
+        self._gear_id = gear_id
         self._athlete_id = athlete_id
         self._athlete_name = get_athlete_name_from_title(self.coordinator.entry.title)
-        self._attr_unique_id = generate_gear_sensor_id(athlete_id, gear_index, "name")
+        self._attr_unique_id = generate_gear_sensor_id(athlete_id, gear_id, "name")
 
     @property
     def device_info(self):
         """Return device information."""
         gear_data = self._gear_data
         gear_name = (
-            gear_data.get("name", f"Gear {self._gear_index + 1}")
+            gear_data.get("name", f"Gear {self._gear_id}")
             if gear_data
-            else f"Gear {self._gear_index + 1}"
+            else f"Gear {self._gear_id}"
         )
         return {
             "identifiers": {
-                (DOMAIN, generate_gear_device_id(self._athlete_id, self._gear_index))
+                (DOMAIN, generate_gear_device_id(self._athlete_id, self._gear_id))
             },
             "name": generate_gear_device_name(self._athlete_name, gear_name),
             "manufacturer": "Powered by Strava",
@@ -1749,9 +1803,9 @@ class StravaGearNameSensor(CoordinatorEntity, SensorEntity):
         """Get the gear data for this sensor."""
         if not self.coordinator.data or not self.coordinator.data.get("gear"):
             return None
-        gear_list = self.coordinator.data["gear"]
-        if self._gear_index < len(gear_list):
-            return gear_list[self._gear_index]
+        for gear_item in self.coordinator.data["gear"]:
+            if str(gear_item.get("id", "")) == self._gear_id:
+                return gear_item
         return None
 
     @property
@@ -1762,7 +1816,11 @@ class StravaGearNameSensor(CoordinatorEntity, SensorEntity):
     @property
     def icon(self):
         """Return the icon of the sensor."""
-        return "mdi:bike"
+        return (
+            "mdi:bike"
+            if get_gear_type_label(self._gear_id) == "Bike"
+            else "mdi:shoe-sneaker"
+        )
 
     @property
     def native_value(self):
@@ -1770,18 +1828,12 @@ class StravaGearNameSensor(CoordinatorEntity, SensorEntity):
         if not self.available:
             return None
         gear_data = self._gear_data
-        return gear_data.get("name", f"Gear {self._gear_index + 1}")
+        return gear_data.get("name", f"Gear {self._gear_id}")
 
     @property
     def name(self):
-        """Return the name of the sensor."""
-        gear_data = self._gear_data
-        gear_name = (
-            gear_data.get("name", f"Gear {self._gear_index + 1}")
-            if gear_data
-            else f"Gear {self._gear_index + 1}"
-        )
-        return generate_gear_sensor_name(self._athlete_name, gear_name, "name")
+        """Return the name of the sensor: the gear type (e.g. "Bike", "Shoes")."""
+        return get_gear_type_label(self._gear_id)
 
     @property
     def extra_state_attributes(self):
@@ -1806,36 +1858,35 @@ class StravaGearNameSensor(CoordinatorEntity, SensorEntity):
 class StravaGearDistanceSensor(CoordinatorEntity, SensorEntity):
     """Sensor for gear distance."""
 
+    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.TOTAL
     _attr_device_class = DEVICE_CLASS_DISTANCE
 
     def __init__(
         self,
         coordinator: StravaDataUpdateCoordinator,
-        gear_index: int,
+        gear_id: str,
         athlete_id: str,
     ):
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self._gear_index = gear_index
+        self._gear_id = gear_id
         self._athlete_id = athlete_id
         self._athlete_name = get_athlete_name_from_title(self.coordinator.entry.title)
-        self._attr_unique_id = generate_gear_sensor_id(
-            athlete_id, gear_index, "distance"
-        )
+        self._attr_unique_id = generate_gear_sensor_id(athlete_id, gear_id, "distance")
 
     @property
     def device_info(self):
         """Return device information."""
         gear_data = self._gear_data
         gear_name = (
-            gear_data.get("name", f"Gear {self._gear_index + 1}")
+            gear_data.get("name", f"Gear {self._gear_id}")
             if gear_data
-            else f"Gear {self._gear_index + 1}"
+            else f"Gear {self._gear_id}"
         )
         return {
             "identifiers": {
-                (DOMAIN, generate_gear_device_id(self._athlete_id, self._gear_index))
+                (DOMAIN, generate_gear_device_id(self._athlete_id, self._gear_id))
             },
             "name": generate_gear_device_name(self._athlete_name, gear_name),
             "manufacturer": "Powered by Strava",
@@ -1848,9 +1899,9 @@ class StravaGearDistanceSensor(CoordinatorEntity, SensorEntity):
         """Get the gear data for this sensor."""
         if not self.coordinator.data or not self.coordinator.data.get("gear"):
             return None
-        gear_list = self.coordinator.data["gear"]
-        if self._gear_index < len(gear_list):
-            return gear_list[self._gear_index]
+        for gear_item in self.coordinator.data["gear"]:
+            if str(gear_item.get("id", "")) == self._gear_id:
+                return gear_item
         return None
 
     @property
@@ -1893,13 +1944,7 @@ class StravaGearDistanceSensor(CoordinatorEntity, SensorEntity):
     @property
     def name(self):
         """Return the name of the sensor."""
-        gear_data = self._gear_data
-        gear_name = (
-            gear_data.get("name", f"Gear {self._gear_index + 1}")
-            if gear_data
-            else f"Gear {self._gear_index + 1}"
-        )
-        return generate_gear_sensor_name(self._athlete_name, gear_name, "distance")
+        return generate_gear_sensor_name("distance")
 
     def _is_metric(self):
         """Determine if the user has configured metric units."""

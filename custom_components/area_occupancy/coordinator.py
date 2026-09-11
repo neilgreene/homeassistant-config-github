@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 # Standard library imports
+from collections import deque
 import contextlib
 from datetime import datetime, timedelta
 import logging
@@ -10,7 +11,8 @@ from typing import Any
 
 # Home Assistant imports
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import (
     area_registry as ar,
@@ -23,15 +25,38 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
 )
 from homeassistant.helpers.start import async_at_started
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 # Local imports
 from .area import AllAreas, Area, AreaDeviceHandle, FloorAreas
-from .const import CONF_AREA_ID, CONF_AREAS, DEFAULT_NAME, DOMAIN, SAVE_INTERVAL
+from .const import (
+    ACCURACY_TICK_BUFFER_MAXLEN,
+    CONF_AREA_ID,
+    CONF_AREAS,
+    DEFAULT_NAME,
+    DOMAIN,
+    ONLINE_PRIOR_STORE_KEY_PREFIX,
+    ONLINE_PRIOR_STORE_VERSION,
+    SAVE_INTERVAL,
+)
+from .data.adjacency import (
+    BoostContribution,
+    DecayModifierContribution,
+    Trajectory,
+    compute_adjacency_boost,
+    compute_decay_modifier,
+)
 from .data.analysis import run_full_analysis
 from .data.config import IntegrationConfig
+from .data.entity_type import InputType
+from .data.metrics import AccuracyMetrics, TickSample
+from .data.online_prior import OnlinePriorEstimator, OnlinePriorState
+from .data.trajectory import TrajectoryTracker
 from .db import AreaOccupancyDB
+from .db.transitions import build_adjacency_index, lookup_transition_probability
+from .time_utils import to_local
 from .utils import format_area_names
 
 _LOGGER = logging.getLogger(__name__)
@@ -75,6 +100,51 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._setup_complete: bool = False
         self._analysis_running: bool = False
         self._cached_correlations: dict[str, dict[str, float]] = {}
+        # Most recent full-analysis duration in milliseconds, written by
+        # data.analysis.run_full_analysis at the end of each pipeline run.
+        # Read by HealthMonitor.check_pipeline_health to flag slow analysis.
+        self._last_analysis_duration_ms: float | None = None
+        # Set to True by the EVENT_HOMEASSISTANT_STOP listener so the
+        # in-flight analysis pipeline (and the sync correlation work it
+        # dispatches to the executor) can bail at the next loop boundary
+        # instead of riding through HA's "final writes shutdown stage".
+        # Read by data.analysis.run_full_analysis and the per-area /
+        # per-entity loops in db.correlation.
+        self._stop_requested: bool = False
+        self._stop_listener_remove: CALLBACK_TYPE | None = None
+
+        # Adjacent-areas Phase 4 runtime state. The trajectory tracker
+        # records area-end edges across the household so the per-area
+        # boost / decay-modifier paths can read a consistent snapshot.
+        # ``_lagged_probabilities`` holds the *previous* tick's
+        # probability per area — captured at the start of ``update``
+        # so the decay modifier and any future per-tick reader can't
+        # feed back on this tick's own outputs.
+        self._trajectory_tracker = TrajectoryTracker()
+        self._lagged_probabilities: dict[str, float] = {}
+        # Adjacency boosts precomputed once per tick in the executor
+        # (since ``lookup_transition_probability`` issues SQL queries),
+        # then read synchronously by ``Area.probability``.
+        self._adjacency_boosts: dict[str, BoostContribution] = {}
+        # Decay modifiers (Option 3a) precomputed alongside the boosts
+        # and applied to each entity's ``Decay.modifier_factor``.
+        self._adjacency_decay_modifiers: dict[str, DecayModifierContribution] = {}
+        # Trust-score epic (#499), shadow mode: rolling per-area tick
+        # observations scored hourly against motion-confirmed ground
+        # truth. maxlen bounds memory to ~24h at the 10s decay cadence.
+        # Nothing here feeds back into probability or thresholds.
+        self._accuracy_ticks: dict[str, deque[TickSample]] = {}
+        self._accuracy_metrics: dict[str, AccuracyMetrics] = {}
+        # DB-retirement epic (#500), shadow mode: per-area online prior
+        # estimators fed from live motion evidence each tick, persisted
+        # via the HA storage helper, and diffed against the DB-computed
+        # prior each analysis cycle. Never read by the probability path.
+        self._online_priors: dict[str, OnlinePriorEstimator] = {}
+        self._online_prior_store: Store[dict[str, dict]] = Store(
+            hass,
+            ONLINE_PRIOR_STORE_VERSION,
+            f"{ONLINE_PRIOR_STORE_KEY_PREFIX}.{self.entry_id}",
+        )
 
     async def async_init_database(self) -> None:
         """Initialize the database asynchronously to avoid blocking the event loop.
@@ -271,11 +341,14 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not area.config.area_id:
                 continue
             area_entry = area_reg.async_get_area(area.config.area_id)
-            if area_entry and area_entry.floor_id:
-                if area_entry.floor_id not in seen_floors:
-                    floor_entry = floor_reg.async_get_floor(area_entry.floor_id)
-                    if floor_entry:
-                        seen_floors[area_entry.floor_id] = floor_entry.name
+            if (
+                area_entry
+                and area_entry.floor_id
+                and area_entry.floor_id not in seen_floors
+            ):
+                floor_entry = floor_reg.async_get_floor(area_entry.floor_id)
+                if floor_entry:
+                    seen_floors[area_entry.floor_id] = floor_entry.name
 
         self._floor_aggregators = {
             floor_id: FloorAreas(self, floor_id, floor_name)
@@ -297,6 +370,50 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def setup_complete(self) -> bool:
         """Return whether setup is complete."""
         return self._setup_complete
+
+    @property
+    def last_analysis_duration_ms(self) -> float | None:
+        """Return the most recent full-analysis duration in milliseconds, if any."""
+        return self._last_analysis_duration_ms
+
+    @property
+    def stop_requested(self) -> bool:
+        """Return whether HA has signalled shutdown.
+
+        The analysis pipeline and the sync correlation loops poll this so
+        they can bail at the next loop boundary instead of riding through
+        HA's "final writes shutdown stage" and tripping its
+        ``Thread … is still running at shutdown`` warning.
+        """
+        return self._stop_requested
+
+    def _on_homeassistant_stop(self, _event: Event) -> None:
+        """Handle HA's ``EVENT_HOMEASSISTANT_STOP``.
+
+        Setting the flag is enough for the analysis pipeline (which polls
+        it inside long-running sync work). Cancelling timers here too
+        prevents a fresh callback from kicking off DB / decay work after
+        HA has already entered shutdown but before ``async_shutdown``
+        runs. The ``_handle_*_timer`` handlers also poll the flag — that
+        catches the race where a callback is already in-flight when this
+        runs (we can't yank it from the loop, but we can stop it from
+        rearming and from starting new executor work).
+        """
+        self._stop_requested = True
+        if self._analysis_timer is not None:
+            self._analysis_timer()
+            self._analysis_timer = None
+        if self._global_decay_timer is not None:
+            self._global_decay_timer()
+            self._global_decay_timer = None
+        # ``_save_timer`` was missed in the original wiring. ``db.save_data``
+        # runs in the executor pool, so a save callback in flight during
+        # shutdown reproduces the "Thread is still running at shutdown"
+        # warning the analysis pipeline used to trigger. Cancel here AND
+        # have ``_handle_save_timer`` return early on the flag.
+        if self._save_timer is not None:
+            self._save_timer()
+            self._save_timer = None
 
     # --- Public Methods ---
     def _validate_areas_configured(self) -> None:
@@ -346,6 +463,14 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
 
             self._validate_areas_configured()
+
+            # Restore online-prior shadow state (#500) for known areas
+            stored_priors = await self._online_prior_store.async_load() or {}
+            for area_name in self.areas:
+                if area_name in stored_priors:
+                    self._online_priors[area_name] = OnlinePriorEstimator(
+                        OnlinePriorState.from_dict(stored_priors[area_name])
+                    )
 
             _LOGGER.info(
                 "Initializing Area Occupancy for %d area(s): %s",
@@ -401,6 +526,16 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Analysis timer is async and runs in background
             await self._start_analysis_timer()
 
+            # Wire up an early shutdown signal so an in-flight analysis
+            # pipeline can bail before HA's "final writes shutdown stage"
+            # rather than after, which is what triggered the
+            # ``Task … was still running after final writes shutdown stage``
+            # warning users were seeing on restart.
+            if self._stop_listener_remove is None:
+                self._stop_listener_remove = self.hass.bus.async_listen_once(
+                    EVENT_HOMEASSISTANT_STOP, self._on_homeassistant_stop
+                )
+
             # Build floor-based aggregators from area floor assignments
             self._build_floor_aggregators()
 
@@ -429,18 +564,210 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Returns:
             Dictionary with area data keyed by area name
         """
-        # Return current state data for all areas (all calculations are in-memory)
+        # Snapshot the previous tick's probabilities and occupancy
+        # state BEFORE this tick recomputes, so the adjacency boost and
+        # decay modifier read lagged values rather than feeding back on
+        # the in-progress recompute.
+        previous = self.data or {}
+        self._lagged_probabilities = {
+            name: float(entry.get("probability") or 0.0)
+            for name, entry in previous.items()
+        }
+        was_occupied = {
+            name: bool(entry.get("occupied")) for name, entry in previous.items()
+        }
+
+        now = dt_util.utcnow()
+        # Precompute adjacency boosts and decay modifiers in the
+        # executor pool (one trip per tick) so the SQL lookups don't
+        # block the event loop. ``Area.probability`` reads boosts via
+        # the cached dict; entity ``Decay`` instances pick up the
+        # modifier through ``set_modifier_factor`` below.
+        (
+            self._adjacency_boosts,
+            self._adjacency_decay_modifiers,
+        ) = await self.hass.async_add_executor_job(self._compute_adjacency_state, now)
+        for area_name, modifier in self._adjacency_decay_modifiers.items():
+            area = self.areas.get(area_name)
+            if area is None:
+                continue
+            for entity in area.entities.entities.values():
+                entity.decay.set_modifier_factor(modifier.decay_modifier)
+
         result = {}
         for area_name, area in self.areas.items():
+            probability = area.probability()
+            is_occupied = probability >= area.threshold()
+            self._trajectory_tracker.observe(
+                area_name,
+                was_occupied=was_occupied.get(area_name, False),
+                is_occupied=is_occupied,
+                now=now,
+            )
+            self._record_shadow_tick(area_name, area, now, probability, is_occupied)
             result[area_name] = {
-                "probability": area.probability(),
-                "occupied": area.occupied(),
+                "probability": probability,
+                "occupied": is_occupied,
                 "threshold": area.threshold(),
                 "prior": area.area_prior(),
                 "decay": area.decay(),
-                "last_updated": dt_util.utcnow(),
+                "last_updated": now,
             }
         return result
+
+    def _record_shadow_tick(
+        self,
+        area_name: str,
+        area: Area,
+        now: datetime,
+        probability: float,
+        is_occupied: bool,
+    ) -> None:
+        """Record one shadow-mode accuracy/online-prior sample for an area.
+
+        Read-only: does not touch ``self.data`` or notify listeners, so
+        calling it outside a full ``update()`` (see
+        ``_handle_decay_timer``) has no effect on entity state or the
+        production refresh cadence.
+        """
+        self._accuracy_ticks.setdefault(
+            area_name, deque(maxlen=ACCURACY_TICK_BUFFER_MAXLEN)
+        ).append(
+            TickSample(timestamp=now, probability=probability, occupied=is_occupied)
+        )
+        # Match db.queries.get_occupied_intervals' ground-truth definition
+        # (motion ∪ media ∪ sleep) rather than motion alone, so the online
+        # numerator and the DB-computed prior it's being diffed against
+        # measure the same thing. Motion's timeout extension isn't
+        # replicated here — see module docstring's known approximations.
+        presence_active = any(
+            entity.evidence
+            and entity.type.input_type
+            in (InputType.MOTION, InputType.MEDIA, InputType.SLEEP)
+            for entity in area.entities.entities.values()
+        )
+        self._online_priors.setdefault(area_name, OnlinePriorEstimator()).observe(
+            motion_active=presence_active, now=now
+        )
+
+    # --- Adjacent-areas (Phase 4) accessors ---
+    @property
+    def lagged_probabilities(self) -> dict[str, float]:
+        """Return the previous tick's per-area probability snapshot.
+
+        Read by the decay modifier so its silence-score is computed
+        against last-tick occupancy of adjacent areas, not the values
+        being recomputed in the current tick.
+        """
+        return self._lagged_probabilities
+
+    def adjacency_boost_for(self, area_name: str) -> BoostContribution | None:
+        """Return the cached adjacency boost for ``area_name`` this tick.
+
+        Returns ``None`` when no boost has been computed this tick (e.g.
+        called outside an active ``update``) or the area isn't in the
+        cache yet. ``Area.probability`` calls this and falls through
+        unmodified when ``None``.
+        """
+        return self._adjacency_boosts.get(area_name)
+
+    def adjacency_decay_modifier_for(
+        self, area_name: str
+    ) -> DecayModifierContribution | None:
+        """Return the cached decay modifier for ``area_name`` this tick."""
+        return self._adjacency_decay_modifiers.get(area_name)
+
+    # --- Trust score (#499, shadow mode) accessors ---
+    def accuracy_samples_for(self, area_name: str) -> list[TickSample]:
+        """Return the rolling tick observations for an area, oldest first."""
+        return list(self._accuracy_ticks.get(area_name, ()))
+
+    def accuracy_metrics_for(self, area_name: str) -> AccuracyMetrics | None:
+        """Return the most recent shadow accuracy snapshot for an area.
+
+        ``None`` until the hourly analysis pipeline has scored the area
+        at least once (or when the area has no tick history yet).
+        """
+        return self._accuracy_metrics.get(area_name)
+
+    def set_accuracy_metrics(self, area_name: str, metrics: AccuracyMetrics) -> None:
+        """Cache an area's shadow accuracy snapshot (analysis pipeline)."""
+        self._accuracy_metrics[area_name] = metrics
+
+    # --- Online prior (#500, shadow mode) accessors ---
+    def online_prior_for(self, area_name: str) -> OnlinePriorEstimator | None:
+        """Return the area's shadow online-prior estimator, if any ticks seen."""
+        return self._online_priors.get(area_name)
+
+    async def async_save_online_priors(self) -> None:
+        """Persist online-prior shadow state via the HA storage helper."""
+        await self._online_prior_store.async_save(
+            {name: est.state.to_dict() for name, est in self._online_priors.items()}
+        )
+
+    def _compute_adjacency_state(
+        self, now: datetime
+    ) -> tuple[dict[str, BoostContribution], dict[str, DecayModifierContribution]]:
+        """Compute boosts and decay modifiers for every area, single executor trip.
+
+        Runs in the thread-pool executor since
+        ``lookup_transition_probability`` issues synchronous SQL queries.
+        Reads the household adjacency index once and reuses it for every
+        per-area lookup.
+        """
+        boosts: dict[str, BoostContribution] = {}
+        modifiers: dict[str, DecayModifierContribution] = {}
+        adjacency_index = build_adjacency_index(self.db, self.entry_id)
+        lagged = self._lagged_probabilities
+
+        def _lookup(*, from_area, mid_area, to_area, hour_of_week):
+            return lookup_transition_probability(
+                self.db,
+                self.entry_id,
+                from_area=from_area,
+                mid_area=mid_area,
+                to_area=to_area,
+                hour_of_week=hour_of_week,
+            )
+
+        for area_name in self.areas:
+            trajectory = self.trajectory_for(area_name, now=now)
+            if trajectory.prev_area is not None:
+                boosts[area_name] = compute_adjacency_boost(
+                    target_area=area_name,
+                    trajectory=trajectory,
+                    lookup=_lookup,
+                )
+            # Decay modifier still fires even with no trajectory — the
+            # 1-hop fallback ``P(target → neighbour)`` is meaningful when
+            # adjacent neighbours are silent. ``base_half_life_seconds=1.0``
+            # makes the diagnostic ``effective_half_life_seconds`` field
+            # carry the unit-less modifier value; the actual per-entity
+            # stretch is applied via ``Decay.set_modifier_factor`` after
+            # this returns.
+            if adjacency_index.get(area_name):
+                modifiers[area_name] = compute_decay_modifier(
+                    target_area=area_name,
+                    adjacency_index=adjacency_index,
+                    lagged_probabilities=lagged,
+                    trajectory=trajectory,
+                    lookup=_lookup,
+                    base_half_life_seconds=1.0,
+                )
+        return boosts, modifiers
+
+    def trajectory_for(self, target_area: str, *, now: datetime) -> Trajectory:
+        """Return the trajectory describing recent ends excluding target.
+
+        Hour-of-week is computed from ``now`` in the user's local
+        timezone — matches the bucketing convention in
+        ``db.transitions._hour_of_week``.
+        """
+        local = to_local(now)
+        hour_of_week = local.weekday() * 24 + local.hour
+        return self._trajectory_tracker.trajectory_for(
+            target_area, hour_of_week=hour_of_week, now=now
+        )
 
     async def async_shutdown(self) -> None:
         """Shutdown the coordinator.
@@ -458,6 +785,20 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             format_area_names(self),
         )
 
+        # Mark stop requested so any analysis run that races shutdown bails
+        # at the next loop boundary. Idempotent with the EVENT_HOMEASSISTANT_STOP
+        # listener — config-entry unloads (e.g. options-flow reload) reach this
+        # path without ever firing the bus event.
+        self._stop_requested = True
+
+        # Step 0: Drop the EVENT_HOMEASSISTANT_STOP listener if it's still
+        # registered. ``async_listen_once`` self-removes when fired, so this
+        # is the unload-without-shutdown case (options reload, integration
+        # remove). Dropping it prevents a leaked listener after reload.
+        if self._stop_listener_remove is not None:
+            self._stop_listener_remove()
+            self._stop_listener_remove = None
+
         # Step 1: Cancel periodic save timer before cleanup and perform final save
         if self._save_timer is not None:
             self._save_timer()
@@ -473,6 +814,20 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (HomeAssistantError, OSError, RuntimeError) as err:
             _LOGGER.error(
                 "Failed final save for areas: %s: %s",
+                format_area_names(self),
+                err,
+            )
+
+        # Step 2b: Persist online-prior shadow state so a restart doesn't
+        # silently drop the occupied-seconds numerator while the period
+        # denominator (anchored at first_observation) keeps growing —
+        # previously this was only saved once per hour by the analysis
+        # pipeline, biasing the online prior low across every restart.
+        try:
+            await self.async_save_online_priors()
+        except (HomeAssistantError, OSError, RuntimeError) as err:
+            _LOGGER.warning(
+                "Failed to save online-prior shadow state for areas: %s: %s",
                 format_area_names(self),
                 err,
             )
@@ -976,6 +1331,14 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Handle periodic save timer firing - save data and reschedule."""
         self._save_timer = None
 
+        # Bail before kicking off executor work if shutdown has been
+        # signalled. ``db.save_data`` runs in the executor pool and
+        # would otherwise reproduce the "Thread is still running at
+        # shutdown" warning. ``async_shutdown`` does its own final
+        # save, so skipping this tick is safe.
+        if self._stop_requested:
+            return
+
         try:
             await self.hass.async_add_executor_job(self.db.save_data)
             _LOGGER.debug(
@@ -989,7 +1352,12 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 err,
             )
 
-        # Reschedule the timer
+        # Reschedule the timer — but not if shutdown was signalled
+        # while ``save_data`` was running in the executor. Otherwise we
+        # leak a registered callback that ``async_shutdown`` will then
+        # have to clean up.
+        if self._stop_requested:
+            return
         self._start_save_timer()
 
     # --- Decay Timer Handling ---
@@ -1010,6 +1378,13 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Handle decay timer firing - refresh coordinator and always reschedule."""
         self._global_decay_timer = None
 
+        # Skip the tick + refresh if shutdown was signalled. The
+        # work itself is in-process and quick (no executor), but
+        # ``async_refresh`` can fan out to listeners that don't
+        # expect to be called once the integration is unwinding.
+        if self._stop_requested:
+            return
+
         # Tick decay for all areas to update state (e.g., stop decay when factor reaches zero)
         # This must be done before refresh to ensure state transitions happen
         for area in self.areas.values():
@@ -1020,8 +1395,26 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         decay_enabled = any(area.config.decay.enabled for area in self.areas.values())
         if decay_enabled:
             await self.async_refresh()
+        else:
+            # Shadow-mode estimators (#499/#500) still need a steady tick
+            # cadence even when no area has decay enabled — without this,
+            # they'd only observe on evidence-triggered refreshes, whose
+            # gaps routinely exceed the online-prior's downtime threshold
+            # and starve its occupied-seconds numerator. Record ticks
+            # directly rather than going through ``async_refresh()`` so
+            # this doesn't change entity refresh cadence for users who
+            # disabled decay to reduce state churn.
+            now = dt_util.utcnow()
+            for area_name, area in self.areas.items():
+                probability = area.probability()
+                is_occupied = probability >= area.threshold()
+                self._record_shadow_tick(area_name, area, now, probability, is_occupied)
 
-        # Reschedule the timer
+        # Reschedule the timer — but not if shutdown was signalled
+        # during ``async_refresh``. Same rearm-leak avoidance as the
+        # save and analysis timers.
+        if self._stop_requested:
+            return
         self._start_decay_timer()
 
     # --- Analysis Timer Handling ---
@@ -1070,6 +1463,13 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if _now is None:
             _now = dt_util.utcnow()
 
+        # Don't start a new pipeline if HA is shutting down. The
+        # EVENT_HOMEASSISTANT_STOP listener already cancelled the timer,
+        # but a previously-fired timer's callback can still land here
+        # before the listener runs.
+        if self._stop_requested:
+            return
+
         # Prevent concurrent analysis runs
         if self._analysis_running:
             _LOGGER.debug("Analysis already running, skipping this trigger")
@@ -1077,6 +1477,13 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._analysis_timer is not None:
                 self._analysis_timer()
                 self._analysis_timer = None
+            # Don't re-arm if shutdown has been signalled while another
+            # analysis is in flight — the EVENT_HOMEASSISTANT_STOP listener
+            # already cancelled the timer slot, and a callback we know
+            # will hit the stop_requested guard is just a registry leak
+            # until ``async_shutdown`` cleans it up.
+            if self._stop_requested:
+                return
             # Reschedule to try again later
             next_update = _now + timedelta(minutes=5)
             self._analysis_timer = async_track_point_in_time(
@@ -1102,13 +1509,24 @@ class AreaOccupancyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _failed = True
         finally:
             self._analysis_running = False
-            # Always reschedule — retry sooner on failure
-            if _failed:
-                next_update = _now + timedelta(minutes=15)
-            else:
-                next_update = _now + timedelta(
-                    seconds=self.integration_config.analysis_interval
-                )
-            self._analysis_timer = async_track_point_in_time(
-                self.hass, self.run_analysis, next_update
+
+        # All exceptions are handled above, so this runs on every path.
+        # If shutdown was signalled DURING the await above, the
+        # EVENT_HOMEASSISTANT_STOP listener has already cancelled
+        # the timer slot and set ``_stop_requested``. Re-arming
+        # here would register a fresh callback that immediately
+        # no-ops in the guard at the top of this method — and
+        # would only be cleaned up later by ``async_shutdown``.
+        # Skip the re-arm entirely.
+        if self._stop_requested:
+            return
+        # Always reschedule — retry sooner on failure
+        if _failed:
+            next_update = _now + timedelta(minutes=15)
+        else:
+            next_update = _now + timedelta(
+                seconds=self.integration_config.analysis_interval
             )
+        self._analysis_timer = async_track_point_in_time(
+            self.hass, self.run_analysis, next_update
+        )

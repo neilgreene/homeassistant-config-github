@@ -1,16 +1,18 @@
 """Calendar utilities processes."""
 
 import logging
+import warnings
 from datetime import datetime
 
+from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
 from dateutil import parser
 from homeassistant.helpers import entity_registry
 from homeassistant.util import slugify
+
 from O365.calendar import Attendee  # pylint: disable=no-name-in-module)
 
 from ..classes.config_entry import MS365ConfigEntry
 from ..const import CONF_ENTITY_NAME
-from ..helpers.utils import clean_html
 from .const_integration import (
     ATTR_ATTENDEES,
     ATTR_BODY,
@@ -28,13 +30,29 @@ from .const_integration import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
+
+
+def clean_html(html):
+    """Clean the HTML."""
+    soup = BeautifulSoup(html, features="html.parser")
+    if body := soup.find("body"):
+        # get text
+        text = body.get_text()
+
+        # break into lines and remove leading and trailing space on each
+        lines = (line.strip() for line in text.splitlines())
+        # break multi-headlines into a line each
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        # drop blank lines
+        text = "\n".join(chunk for chunk in chunks if chunk)
+        return text.replace("\xa0", " ")
+
+    return html
 
 
 def format_event_data(event):
     """Format the event data."""
-    # if hasattr(event.attendees, "attendees"):
-    #     attendees = event.attendees.attendees
-    # else:
     attendees = event.attendees._Attendees__attendees  # pylint: disable=protected-access
     return {
         "summary": event.subject,
@@ -50,8 +68,16 @@ def format_event_data(event):
             "minutes": event.remind_before_minutes,
             "is_on": event.is_reminder_on,
         },
+        "organizer": event.organizer.address,
         "attendees": [
-            {"email": x.address, "type": x.attendee_type.value} for x in attendees
+            {
+                "email": x.address,
+                "type": x.attendee_type.value,
+                "status": x.response_status.status.value
+                if x.response_status.status
+                else None,
+            }
+            for x in attendees
         ],
         "uid": event.object_id,
     }

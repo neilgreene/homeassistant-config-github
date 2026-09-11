@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__home-assistant__ha_search",
+      "mcp__home-assistant__ha_list_services"
+    ]
+  }
+}

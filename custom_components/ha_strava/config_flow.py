@@ -39,15 +39,29 @@ from .const import (
     CONF_NUM_RECENT_ACTIVITIES_DEFAULT,
     CONF_NUM_RECENT_ACTIVITIES_MAX,
     CONF_PHOTOS,
+    CONF_STRAVA_APP_MODE,
     DEFAULT_ACTIVITY_TYPES,
     DOMAIN,
     OAUTH2_AUTHORIZE,
+    OAUTH2_SCOPES,
     OAUTH2_TOKEN,
+    STRAVA_APP_MODE_SHARED,
+    STRAVA_APP_MODE_SOLO,
     SUPPORTED_ACTIVITY_TYPES,
     normalize_activity_type,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _find_entries_with_client_id(hass, client_id: str) -> list:
+    """Return all loaded config entries that share the given client_id."""
+    return [
+        e
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if e.data.get(CONF_CLIENT_ID) == client_id
+    ]
+
 
 DISTANCE_UNIT_OVERRIDE_OPTIONS = [
     CONF_DISTANCE_UNIT_OVERRIDE_DEFAULT,
@@ -115,7 +129,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         CONF_DISTANCE_UNIT_OVERRIDE,
                         default=self.config_entry.options.get(
                             CONF_DISTANCE_UNIT_OVERRIDE,
-                            CONF_DISTANCE_UNIT_OVERRIDE_DEFAULT,
+                            self.config_entry.data.get(
+                                CONF_DISTANCE_UNIT_OVERRIDE,
+                                CONF_DISTANCE_UNIT_OVERRIDE_DEFAULT,
+                            ),
                         ),
                     ): vol.In(DISTANCE_UNIT_OVERRIDE_OPTIONS),
                     vol.Required(
@@ -264,29 +281,24 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         continue
 
                     # Handle gear devices
-                    # Format: strava_{athlete_id}_gear_{index}
+                    # Old format: strava_{athlete_id}_gear_{numeric_index}
+                    # New format: strava_{athlete_id}_gear_{gear_id}  (e.g. "b111111")
                     if device_type == "gear":
                         gear_enabled = user_input.get(CONF_GEAR_ENABLED, False)
-                        new_num_gear_sensors = user_input.get(CONF_NUM_GEAR_SENSORS, 0)
 
                         if not gear_enabled:
                             # Remove all gear devices if gear sensors are disabled
                             _device_registry.async_remove_device(device.id)
                             continue
 
-                        # Extract gear index from device identifier
                         if len(parts) >= 4 and parts[3].isdigit():
-                            gear_index = int(parts[3])
-                            # Remove if gear_index >= new_num_gear_sensors (0-indexed, so >= means out of range)
-                            if gear_index >= new_num_gear_sensors:
-                                _device_registry.async_remove_device(device.id)
-                            else:
-                                _device_registry.async_update_device(
-                                    device.id, disabled_by=None
-                                )
-                        else:
-                            # Malformed gear device identifier, remove it
+                            # Legacy index-based format — remove it
                             _device_registry.async_remove_device(device.id)
+                        else:
+                            # New gear_id format — keep and enable
+                            _device_registry.async_update_device(
+                                device.id, disabled_by=None
+                            )
                         continue
 
                     # Handle activity type devices (skip "stats")
@@ -429,24 +441,20 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                                         # Remove excess recent activity entities (not disable)
                                         _entity_registry.async_remove(entity.entity_id)
                         # Handle gear entities
-                        # Format: strava_{athlete_id}_gear_{index}_{sensor_type}
+                        # Old format: strava_{athlete_id}_gear_{numeric_index}_{sensor_type}
+                        # New format: strava_{athlete_id}_gear_{gear_id}_{sensor_type}  (e.g. "b111111")
                         elif "_gear_" in entity.entity_id:
                             gear_enabled = user_input.get(CONF_GEAR_ENABLED, False)
-                            new_num_gear_sensors = user_input.get(
-                                CONF_NUM_GEAR_SENSORS, 0
-                            )
 
                             if not gear_enabled:
                                 # Remove all gear entities if gear sensors are disabled
                                 _entity_registry.async_remove(entity.entity_id)
                                 continue
 
-                            # Extract gear index from entity ID
                             # Remove "sensor." prefix if present
                             entity_id = entity.entity_id.split(".", 1)[-1]
                             parts = entity_id.split("_")
 
-                            # Format: strava_{athlete_id}_gear_{index} or strava_{athlete_id}_gear_{index}_{sensor_type}
                             if (
                                 len(parts) >= 4
                                 and parts[0] == "strava"
@@ -454,17 +462,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                                 and parts[2] == "gear"
                                 and parts[3].isdigit()
                             ):
-                                gear_index = int(parts[3])
-                                # Remove if gear_index >= new_num_gear_sensors (0-indexed, so >= means out of range)
-                                if gear_index >= new_num_gear_sensors:
-                                    _entity_registry.async_remove(entity.entity_id)
-                                else:
-                                    _entity_registry.async_update_entity(
-                                        entity.entity_id, disabled_by=None
-                                    )
-                            else:
-                                # Malformed gear entity identifier, remove it
+                                # Legacy index-based format — remove it
                                 _entity_registry.async_remove(entity.entity_id)
+                            else:
+                                # New gear_id format — keep and enable
+                                _entity_registry.async_update_entity(
+                                    entity.entity_id, disabled_by=None
+                                )
                     except (ValueError, IndexError, AttributeError) as e:
                         # Skip entities that don't match expected format
                         _LOGGER.debug(
@@ -525,6 +529,7 @@ class OAuth2FlowHandler(
         """Initialize the OAuth2 flow handler."""
         super().__init__()
         self._user_input = None
+        self._shared_app: bool = False
         self.reauth_entry_data: Optional[Mapping[str, Any]] = None
 
     @property
@@ -536,7 +541,7 @@ class OAuth2FlowHandler(
     def extra_authorize_data(self) -> dict:
         """Extra data that needs to be appended to the authorize url."""
         return {
-            "scope": "activity:read_all,profile:read_all",
+            "scope": OAUTH2_SCOPES,
             "approval_prompt": "force",
             "response_type": "code",
         }
@@ -631,6 +636,10 @@ class OAuth2FlowHandler(
 
         if user_input is not None:
             self._user_input = user_input
+            existing = _find_entries_with_client_id(
+                self.hass, user_input[CONF_CLIENT_ID]
+            )
+            self._shared_app = len(existing) > 0
             config_entry_oauth2_flow.async_register_implementation(
                 self.hass,
                 DOMAIN,
@@ -725,6 +734,10 @@ class OAuth2FlowHandler(
             data[CONF_NUM_RECENT_ACTIVITIES] = CONF_NUM_RECENT_ACTIVITIES_DEFAULT
             data[CONF_GEAR_ENABLED] = False
             data[CONF_NUM_GEAR_SENSORS] = CONF_NUM_GEAR_SENSORS_DEFAULT
+
+        data[CONF_STRAVA_APP_MODE] = (
+            STRAVA_APP_MODE_SHARED if self._shared_app else STRAVA_APP_MODE_SOLO
+        )
 
         return self.async_create_entry(title=title, data=data)
 

@@ -14,12 +14,15 @@ from homeassistant.helpers import config_entry_oauth2_flow
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    CONF_ACTIVITY_TYPE_OTHER,
     CONF_ACTIVITY_TYPES_TO_TRACK,
     CONF_API_RETRY_BASE_DELAY_SECONDS,
     CONF_API_RETRY_MAX_ATTEMPTS,
     CONF_ATTR_COMMUTE,
     CONF_ATTR_END_LATLONG,
+    CONF_ATTR_KOM_SEGMENTS,
     CONF_ATTR_POLYLINE,
+    CONF_ATTR_PR_SEGMENTS,
     CONF_ATTR_PRIVATE,
     CONF_ATTR_SPORT_TYPE,
     CONF_ATTR_START_LATLONG,
@@ -57,12 +60,14 @@ from .const import (
     CONF_SENSOR_KUDOS,
     CONF_SENSOR_MOVING_TIME,
     CONF_SENSOR_POWER,
+    CONF_SENSOR_PR_COUNT,
     CONF_SENSOR_TITLE,
     CONF_SENSOR_TROPHIES,
     CONFIG_IMG_SIZE,
     DOMAIN,
     OAUTH2_AUTHORIZE,
     OAUTH2_TOKEN,
+    SUPPORTED_ACTIVITY_TYPES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -178,7 +183,15 @@ class StravaDataUpdateCoordinator(DataUpdateCoordinator):
 
             # Filter activities based on selected activity types
             # If no activity types selected, skip all activities
-            if not selected_activity_types or effective_type not in selected_activity_types:
+            if not selected_activity_types:
+                continue
+            if effective_type not in SUPPORTED_ACTIVITY_TYPES:
+                # Unknown type: bucket as Other if user selected it, otherwise drop
+                if CONF_ACTIVITY_TYPE_OTHER in selected_activity_types:
+                    effective_type = CONF_ACTIVITY_TYPE_OTHER
+                else:
+                    continue
+            elif effective_type not in selected_activity_types:
                 continue
 
             activity_id = activity["id"]
@@ -203,7 +216,15 @@ class StravaDataUpdateCoordinator(DataUpdateCoordinator):
 
             # Filter activities based on selected activity types
             # If no activity types selected, skip all activities
-            if not selected_activity_types or effective_type not in selected_activity_types:
+            if not selected_activity_types:
+                continue
+            if effective_type not in SUPPORTED_ACTIVITY_TYPES:
+                # Unknown type: bucket as Other if user selected it, otherwise drop
+                if CONF_ACTIVITY_TYPE_OTHER in selected_activity_types:
+                    effective_type = CONF_ACTIVITY_TYPE_OTHER
+                else:
+                    continue
+            elif effective_type not in selected_activity_types:
                 continue
 
             activity_id = int(activity["id"])
@@ -217,7 +238,10 @@ class StravaDataUpdateCoordinator(DataUpdateCoordinator):
                 try:
                     activity_response = await self.oauth_session.async_request(
                         method="GET",
-                        url=f"https://www.strava.com/api/v3/activities/{activity_id}",
+                        url=(
+                            f"https://www.strava.com/api/v3/activities/{activity_id}"
+                            "?include_all_efforts=true"
+                        ),
                     )
                     if activity_response.status == 200:
                         response_json = await activity_response.json()
@@ -236,6 +260,7 @@ class StravaDataUpdateCoordinator(DataUpdateCoordinator):
                 self._sensor_activity(
                     activity,
                     activity_dto,
+                    effective_type,
                 )
             )
 
@@ -499,6 +524,130 @@ class StravaDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"Error fetching gear {gear_id}: {e}")
             return {}
 
+    async def async_update_activity(
+        self, activity_id: int | str, **fields: dict
+    ) -> None:
+        """Update an activity via the Strava API and refresh local state."""
+        try:
+            await self.oauth_session.async_ensure_token_valid()
+        except aiohttp.ClientError as err:
+            _LOGGER.error(f"Error ensuring token is valid: {err}")
+            raise UpdateFailed(f"Authentication error: {err}") from err
+
+        url = f"https://www.strava.com/api/v3/activities/{activity_id}"
+        payload = {k: v for k, v in fields.items() if v is not None}
+        updated_activity = None
+        last_exception = None
+
+        for attempt in range(CONF_API_RETRY_MAX_ATTEMPTS):
+            try:
+                response = await self.oauth_session.async_request(
+                    method="PUT",
+                    url=url,
+                    json=payload,
+                )
+
+                if response.status == 429:
+                    retry_after = int(
+                        response.headers.get(
+                            "Retry-After",
+                            CONF_API_RETRY_BASE_DELAY_SECONDS * (2**attempt),
+                        )
+                    )
+                    if attempt < CONF_API_RETRY_MAX_ATTEMPTS - 1:
+                        _LOGGER.warning(
+                            f"Rate limit hit updating activity {activity_id}, "
+                            f"retrying after {retry_after} seconds "
+                            f"(attempt {attempt + 1}/{CONF_API_RETRY_MAX_ATTEMPTS})"
+                        )
+                        await asyncio.sleep(retry_after)
+                        continue
+                    raise UpdateFailed(
+                        f"Rate limit exceeded updating activity {activity_id} "
+                        f"after {CONF_API_RETRY_MAX_ATTEMPTS} attempts"
+                    )
+
+                response.raise_for_status()
+                updated_activity = await response.json()
+                break
+
+            except aiohttp.ClientResponseError as err:
+                if err.status in (401, 403):
+                    raise ConfigEntryAuthFailed(
+                        f"Insufficient permissions to update activity {activity_id}. "
+                        "Please re-authenticate the integration."
+                    ) from err
+                if err.status == 429 and attempt < CONF_API_RETRY_MAX_ATTEMPTS - 1:
+                    retry_after = int(
+                        err.headers.get(
+                            "Retry-After",
+                            CONF_API_RETRY_BASE_DELAY_SECONDS * (2**attempt),
+                        )
+                    )
+                    _LOGGER.warning(
+                        f"Rate limit hit updating activity {activity_id}, "
+                        f"retrying after {retry_after} seconds "
+                        f"(attempt {attempt + 1}/{CONF_API_RETRY_MAX_ATTEMPTS})"
+                    )
+                    await asyncio.sleep(retry_after)
+                    last_exception = err
+                    continue
+                raise UpdateFailed(
+                    f"Error updating activity {activity_id}: {err}"
+                ) from err
+            except aiohttp.ClientError as err:
+                last_exception = err
+                if attempt < CONF_API_RETRY_MAX_ATTEMPTS - 1:
+                    await asyncio.sleep(
+                        CONF_API_RETRY_BASE_DELAY_SECONDS * (2**attempt)
+                    )
+                    continue
+                raise UpdateFailed(
+                    f"Network error updating activity {activity_id}: {err}"
+                ) from err
+
+        if updated_activity is None:
+            if last_exception:
+                raise last_exception
+            raise UpdateFailed(
+                f"Failed to update activity {activity_id} "
+                f"after {CONF_API_RETRY_MAX_ATTEMPTS} attempts"
+            )
+
+        _LOGGER.info(f"Successfully updated activity {activity_id}: {payload}")
+
+        processed = self._sensor_activity(
+            updated_activity,
+            updated_activity,
+            sport_type=updated_activity.get("sport_type"),
+        )
+        current_data = self.data or {}
+        current_activities = current_data.get("activities") or []
+        new_activities = []
+        updated = False
+
+        for existing in current_activities:
+            if existing.get(CONF_SENSOR_ID) == processed.get(CONF_SENSOR_ID):
+                new_activities.append(processed)
+                updated = True
+            else:
+                new_activities.append(existing)
+
+        if not updated:
+            new_activities.append(processed)
+
+        num_recent_activities = self.entry.options.get(
+            CONF_NUM_RECENT_ACTIVITIES, CONF_NUM_RECENT_ACTIVITIES_DEFAULT
+        )
+        sorted_activities = sorted(
+            new_activities,
+            key=lambda a: a[CONF_SENSOR_DATE],
+            reverse=True,
+        )
+        limited_activities = sorted_activities[:num_recent_activities]
+
+        self.async_set_updated_data({**current_data, "activities": limited_activities})
+
     async def async_refresh_activity(self, activity_id: int) -> None:
         if not activity_id:
             return
@@ -514,7 +663,10 @@ class StravaDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             response = await self.oauth_session.async_request(
                 method="GET",
-                url=f"https://www.strava.com/api/v3/activities/{activity_id}",
+                url=(
+                    f"https://www.strava.com/api/v3/activities/{activity_id}"
+                    "?include_all_efforts=true"
+                ),
             )
             response.raise_for_status()
             activity_detail = await response.json()
@@ -566,7 +718,9 @@ class StravaDataUpdateCoordinator(DataUpdateCoordinator):
 
         self.async_set_updated_data(new_data)
 
-    def _sensor_activity(self, activity: dict, activity_dto: dict) -> dict:
+    def _sensor_activity(
+        self, activity: dict, activity_dto: dict, sport_type: str = None
+    ) -> dict:
         # Extract device information
         device_name = "Unknown"
         device_type = "Unknown"
@@ -608,6 +762,18 @@ class StravaDataUpdateCoordinator(DataUpdateCoordinator):
 
             calories_kcal = activity_dto.get("calories")
 
+        pr_segments: list[str] = []
+        kom_segments: list[str] = []
+        if activity_dto:
+            for effort in activity_dto.get("segment_efforts") or []:
+                segment_name = effort.get("name")
+                if not segment_name:
+                    continue
+                if effort.get("pr_rank") == 1:
+                    pr_segments.append(segment_name)
+                if effort.get("is_kom"):
+                    kom_segments.append(segment_name)
+
         # Fallback to basic location info
         location = (
             activity.get("location_city")
@@ -616,7 +782,9 @@ class StravaDataUpdateCoordinator(DataUpdateCoordinator):
         )
 
         source = activity_dto if activity_dto else activity
-        effective_sport_type = source.get("sport_type") or source.get("type")
+        effective_sport_type = sport_type or (
+            source.get("sport_type") or source.get("type")
+        )
 
         return {
             CONF_SENSOR_ID: activity.get("id"),
@@ -633,7 +801,8 @@ class StravaDataUpdateCoordinator(DataUpdateCoordinator):
             CONF_SENSOR_KUDOS: activity.get("kudos_count"),
             CONF_SENSOR_ELEVATION: activity.get("total_elevation_gain"),
             CONF_SENSOR_POWER: activity.get("average_watts"),
-            CONF_SENSOR_TROPHIES: activity.get("achievement_count"),
+            CONF_SENSOR_TROPHIES: source.get("achievement_count"),
+            CONF_SENSOR_PR_COUNT: source.get("pr_count"),
             CONF_SENSOR_HEART_RATE_AVG: activity.get("average_heartrate"),
             CONF_SENSOR_HEART_RATE_MAX: activity.get("max_heartrate"),
             CONF_SENSOR_CADENCE_AVG: activity.get("average_cadence"),
@@ -643,6 +812,8 @@ class StravaDataUpdateCoordinator(DataUpdateCoordinator):
             CONF_ATTR_COMMUTE: activity.get("commute", False),
             CONF_ATTR_PRIVATE: activity.get("private", False),
             CONF_ATTR_POLYLINE: activity.get("map", {}).get("summary_polyline", ""),
+            CONF_ATTR_PR_SEGMENTS: pr_segments,
+            CONF_ATTR_KOM_SEGMENTS: kom_segments,
             # Activity Details
             CONF_SENSOR_CALORIES: calories_kcal,
             # Device source tracking

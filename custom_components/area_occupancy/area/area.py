@@ -20,6 +20,7 @@ from ..const import (
     MIN_PROBABILITY,
 )
 from ..data.activity import ActivityId, DetectedActivity, detect_activity
+from ..data.adjacency import apply_logit_boost
 from ..data.analysis import start_prior_analysis
 from ..data.health import HealthMonitor
 from ..utils import (
@@ -169,7 +170,10 @@ class Area:
         if self._health_monitor is None:
             area_id = self.config.area_id or self.area_name
             self._health_monitor = HealthMonitor(
-                self.area_name, area_id, self.coordinator.hass
+                self.area_name,
+                area_id,
+                self.coordinator.hass,
+                purpose=self.purpose.purpose,
             )
         return self._health_monitor
 
@@ -213,8 +217,8 @@ class Area:
         """Calculate sensor-only occupancy probability (no activity boost).
 
         Combines presence probability (from strong binary indicators) with
-        environmental confidence (from environmental sensors) using weighted
-        averaging in logit space.
+        environmental confidence (from environmental sensors) as an additive
+        update in logit space.
 
         This is the first phase of the two-phase probability calculation.
         Activity detection receives this value to avoid circular dependency.
@@ -229,22 +233,27 @@ class Area:
         presence = self.presence_probability()
         env = self.environmental_confidence()
 
-        # Skip the 80/20 blend when no environmental sensors are configured.
-        # environmental_confidence() returns exactly 0.5 only when there are no
-        # environmental entities, and blending with neutral would compress
-        # presence toward 0.5 unnecessarily.
+        # Short-circuit on neutral environmental confidence. 0.5 is what
+        # environmental_confidence() returns whenever the environmental channel
+        # contributes nothing — no environmental sensors configured, or none of
+        # them currently active. calc_combined() is continuous at that point
+        # (logit(0.5) == 0, so it returns presence unchanged) — this just skips
+        # a redundant logit/sigmoid round-trip.
         if env == 0.5:
             return presence
 
         return calc_combined(presence, env)
 
     def probability(self) -> float:
-        """Calculate occupancy probability with activity-based boost.
+        """Calculate occupancy probability with activity- and adjacency-based boosts.
 
-        Two-phase calculation:
-        1. _base_probability() computes sensor-only probability.
-        2. Activity detection runs against the base probability.
-        3. If a strong activity is detected, boost probability in logit space.
+        Three-phase calculation:
+        1. ``_base_probability()`` computes sensor-only probability.
+        2. Activity detection runs against the base probability;
+           a strong activity boosts in logit space.
+        3. The adjacency boost (Phase 4) bends the result toward what
+           the household's learned transitions suggest comes next given
+           the recent trajectory.
 
         Returns:
             Probability value (0.0-1.0)
@@ -255,15 +264,22 @@ class Area:
         activity = detect_activity(self, base_probability=base, is_occupied=is_occupied)
 
         if activity.activity_id in (ActivityId.UNOCCUPIED, ActivityId.IDLE):
-            return base
+            result = base
+        else:
+            result = apply_activity_boost(
+                base, activity.occupancy_boost, activity.confidence
+            )
 
-        return apply_activity_boost(base, activity.occupancy_boost, activity.confidence)
+        boost = self.coordinator.adjacency_boost_for(self.area_name)
+        if boost is not None:
+            result = apply_logit_boost(result, boost)
+        return result
 
     def presence_probability(self) -> float:
         """Calculate presence probability from strong binary indicators.
 
-        Uses motion, media, appliances, doors, windows, covers, and power
-        sensors to determine presence likelihood.
+        Uses motion, media, appliances, doors, windows, covers, power, and
+        Wi-Fi client-count sensors to determine presence likelihood.
 
         Returns:
             Probability value (0.0-1.0)

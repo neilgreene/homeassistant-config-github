@@ -1,5 +1,7 @@
 """Entity model."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -96,8 +98,11 @@ class Entity:
             raise ValueError("Either hass or state_provider must be provided")
         if self.hass is not None and self.state_provider is not None:
             raise ValueError("Cannot provide both hass and state_provider")
-        if self.last_updated is None:
-            self.last_updated = dt_util.utcnow()
+        self.last_updated = (
+            to_utc(self.last_updated)
+            if self.last_updated is not None
+            else dt_util.utcnow()
+        )
 
         # Store the static probability values in protected attributes
         # These are used as fallbacks when Gaussian calculation is not available
@@ -275,10 +280,7 @@ class Entity:
             if state_obj is None:
                 return None
             # Handle both object with .state attribute and direct value
-            if hasattr(state_obj, "state"):
-                state_value = state_obj.state
-            else:
-                state_value = state_obj
+            state_value = state_obj.state if hasattr(state_obj, "state") else state_obj
         else:
             ha_state = self.hass.states.get(self.entity_id)
             if ha_state is None:
@@ -617,7 +619,7 @@ class EntityFactory:
 
     def __init__(
         self,
-        coordinator: "AreaOccupancyCoordinator",
+        coordinator: AreaOccupancyCoordinator,
         area_name: str,
     ) -> None:
         """Initialize the factory.
@@ -637,7 +639,7 @@ class EntityFactory:
             )
         self.config = coordinator.areas[area_name].config
 
-    def create_from_db(self, entity_obj: "DB.Entities") -> Entity:
+    def create_from_db(self, entity_obj: DB.Entities) -> Entity:
         """Create entity from storage data.
 
         Args:
@@ -974,7 +976,7 @@ class EntityManager:
 
     def __init__(
         self,
-        coordinator: "AreaOccupancyCoordinator",
+        coordinator: AreaOccupancyCoordinator,
         area_name: str | None = None,
     ) -> None:
         """Initialize the entity manager.
@@ -1005,9 +1007,7 @@ class EntityManager:
         """Get the entities."""
         return self._entities
 
-    def get_entities_by_input_type(
-        self, input_type: "InputType"
-    ) -> dict[str, "Entity"]:
+    def get_entities_by_input_type(self, input_type: InputType) -> dict[str, Entity]:
         """Get entities filtered by InputType."""
         return {
             entity_id: entity
