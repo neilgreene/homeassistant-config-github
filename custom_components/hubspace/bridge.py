@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import aioafero
 from aioafero import EventType, InvalidAuth, InvalidResponse, TemperatureUnit
 from aioafero.v1 import AferoBridgeV1
 import aiohttp
@@ -51,13 +52,15 @@ class HubspaceBridge:
         self.config_entry = config_entry
         self.hass = hass
         self.authorized = False
-        # light id -> color-mode / power state before night-light was enabled
-        self.night_light_previous_modes: dict[str, str] = {}
-        self.night_light_was_on: dict[str, bool] = {}
         # Jobs to be executed when API is reset.
         self.reset_jobs: list[core.CALLBACK_TYPE] = []
         # self.sensor_manager: SensorManager | None = None
         self.logger = logging.getLogger(__name__)
+        self.logger.info(
+            "Using aioafero %s (SplitDeviceId=%s)",
+            aioafero.__version__,
+            hasattr(aioafero, "SplitDeviceId"),
+        )
         polling_interval = int(self.config_entry.options[POLLING_TIME_STR])
         # Afero only supports Celsius and Fahrenheit so we use hass.config.units.temperature_unit
         temp_unit = (
